@@ -96,7 +96,7 @@ use `/ask`. New proposals and hand-overs can be posted to the admin channel with
 | Page | Who | What |
 |---|---|---|
 | Drawer on every page | `CanUseAssistant` | A launcher button and a chat panel that starts with the page and server as context. |
-| `/assistant` | `CanUseAssistant` | Your conversations and a full-size chat. |
+| `/assistant/chat` | `CanUseAssistant` | Your conversations and a full-size chat. |
 | `/assistant/approvals` | `CanUseAssistant` | Players waiting for an admin, pending and decided proposals. Marking a hand-over handled needs `CanControlServers`. |
 | `/assistant/settings` | `CanManageSecurity` | Backends and API keys; per role the backend order, modes, limits, MCP servers and skills; player support and restore rules; notifications, Discord and usage. |
 

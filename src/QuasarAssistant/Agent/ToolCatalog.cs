@@ -8,6 +8,7 @@ using System.Text.Json.Schema;
 using System.Text.Json.Serialization.Metadata;
 using System.Text.RegularExpressions;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Quasar.Plugin.Abstractions.Operations;
 using Quasar.Plugin.Abstractions.Security;
 using QuasarAssistant.Llm;
@@ -58,7 +59,8 @@ public sealed record ToolSet(
 public sealed partial class ToolCatalog(
     IEnumerable<QuasarOperation> operations,
     IServiceScopeFactory scopes,
-    McpRegistry mcp
+    McpRegistry mcp,
+    ILogger<ToolCatalog> logger
 )
 {
     public const string RestoreKey = "quasar.core/my.grid.restore";
@@ -66,7 +68,14 @@ public sealed partial class ToolCatalog(
 
     private static readonly JsonSerializerOptions SchemaOptions = new(JsonSerializerDefaults.Web)
     {
-        TypeInfoResolver = new DefaultJsonTypeInfoResolver(),
+        TypeInfoResolver = new DefaultJsonTypeInfoResolver { Modifiers = { SkipStructDefaults } },
+    };
+    private static readonly JsonSchemaExporterOptions ExporterOptions = new()
+    {
+        TreatNullObliviousAsNonNullable = true,
+        // Any JSON value, such as a JsonElement's: the APIs want an empty schema rather than true.
+        TransformSchemaNode = (_, schema) =>
+            schema.GetValueKind() == JsonValueKind.True ? new JsonObject() : schema,
     };
     private readonly IReadOnlyList<QuasarOperation> _operations = operations
         .Where(op => op.Kind is QuasarOperationKind.Json or QuasarOperationKind.Read)
@@ -146,7 +155,7 @@ public sealed partial class ToolCatalog(
     private static QuasarOperationMetadata Resolved(QuasarOperation operation) =>
         operation.Metadata.ResolveFor(operation.Kind, operation.OperationId);
 
-    private static ToolSet Build(
+    private ToolSet Build(
         RoleSettings role,
         string roleName,
         bool canAct,
@@ -184,7 +193,8 @@ public sealed partial class ToolCatalog(
                 {
                     Operation = operation,
                 };
-                tools.Add((tool, Describe(tool), Schema(operation)));
+                if (SchemaOrNull(operation) is { } schema)
+                    tools.Add((tool, Describe(tool), schema));
             }
             AddMcpTools(tools, role, roleName, available, mcpTools);
         }
@@ -338,17 +348,31 @@ public sealed partial class ToolCatalog(
 
     private static JsonElement Parse(string json) => JsonDocument.Parse(json).RootElement.Clone();
 
+    /// <summary>One plugin's odd request type must not take the other tools down with it.</summary>
+    private JsonElement? SchemaOrNull(QuasarOperation operation)
+    {
+        try
+        {
+            return Schema(operation);
+        }
+        catch (Exception e)
+        {
+            logger.LogWarning(
+                e,
+                "The assistant leaves out {Operation}: its request schema can't be exported",
+                operation.Key
+            );
+            return null;
+        }
+    }
+
     private static JsonElement Schema(QuasarOperation operation)
     {
         var type = operation.RequestType;
         return ObjectSchema(
             type is null
                 ? null
-                : JsonSchemaExporter.GetJsonSchemaAsNode(
-                    SchemaOptions,
-                    type,
-                    new JsonSchemaExporterOptions { TreatNullObliviousAsNonNullable = true }
-                )
+                : JsonSchemaExporter.GetJsonSchemaAsNode(SchemaOptions, type, ExporterOptions)
         );
     }
 
@@ -370,6 +394,25 @@ public sealed partial class ToolCatalog(
                 && array.Any(item =>
                     item is JsonValue v && v.TryGetValue<string>(out var t) && t == "object"
                 );
+
+    /// <summary>
+    /// The exporter writes a constructor parameter's default into the schema, but a struct parameter's
+    /// <c>= default</c> reads back as null, which it can't serialize (core's <c>JsonElement Value = default</c>).
+    /// Such a type is described without its constructor: no defaults, the parameters without one still required.
+    /// </summary>
+    private static void SkipStructDefaults(JsonTypeInfo info)
+    {
+        if (info.Kind != JsonTypeInfoKind.Object || !info.Properties.Any(HasStructDefault))
+            return;
+        foreach (var property in info.Properties)
+            property.IsRequired = property.AssociatedParameter is { HasDefaultValue: false };
+        info.CreateObject = () => RuntimeHelpers.GetUninitializedObject(info.Type);
+    }
+
+    private static bool HasStructDefault(JsonPropertyInfo property) =>
+        property.AssociatedParameter is { HasDefaultValue: true, DefaultValue: null }
+        && property.PropertyType.IsValueType
+        && Nullable.GetUnderlyingType(property.PropertyType) is null;
 
     [GeneratedRegex("[^a-zA-Z0-9_-]")]
     private static partial Regex NotAllowed();

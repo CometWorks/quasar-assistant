@@ -272,7 +272,7 @@ public sealed class PlayerTests
             ask.Game("2") with
             {
                 Source = new(
-                    Quasar.Plugin.Abstractions.Assistant.QuasarRequestChannel.Game,
+                    global::Quasar.Plugin.Abstractions.Assistant.QuasarRequestChannel.Game,
                     "alpha",
                     "node-2"
                 ),

@@ -8,7 +8,7 @@
             <button type="button" class="assistant-icon-button" title="New conversation" aria-label="New conversation" @onclick="New">
                 <AssistantIcon Icon="@AssistantIcons.Add" />
             </button>
-            <a class="assistant-icon-button" href="@(_conversationId is null ? "assistant" : "assistant/" + _conversationId)" title="Open on the Assistant page" aria-label="Open on the Assistant page">
+            <a class="assistant-icon-button" href="@(_conversationId is null ? "assistant/chat" : "assistant/chat/" + _conversationId)" title="Open on the Assistant page" aria-label="Open on the Assistant page">
                 <AssistantIcon Icon="@AssistantIcons.OpenInNew" />
             </a>
             <button type="button" class="assistant-icon-button" title="Close" aria-label="Close the assistant" @onclick="() => _open = false">
