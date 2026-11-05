@@ -2,6 +2,7 @@ using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Quasar.Plugin.Abstractions.Operations;
 using Quasar.Plugin.Abstractions.Security;
 using QuasarAssistant.Llm;
@@ -55,7 +56,8 @@ public sealed class ToolExecutor(
     GridRestores restores,
     HandoverService handovers,
     SkillLibrary skills,
-    IServiceScopeFactory scopes
+    IServiceScopeFactory scopes,
+    ILogger<ToolExecutor> logger
 )
 {
     public async Task<ChatMessage> ExecuteAsync(
@@ -242,6 +244,13 @@ public sealed class ToolExecutor(
             when (error is JsonException or ArgumentException or FormatException)
         {
             return new("Invalid arguments: " + error.Message, true);
+        }
+        // Core passes on what else a handler throws, such as a companion's answer that the player owns no
+        // backup of the grid. The model tells the player; the run goes on.
+        catch (Exception error) when (error is not OperationCanceledException)
+        {
+            logger.LogWarning(error, "The tool {Tool} failed", call.Name);
+            return new(ResultFilter.Cap("Failed: " + error.Message, run.CapBytes), true);
         }
     }
 

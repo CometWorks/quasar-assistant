@@ -12,7 +12,7 @@ namespace QuasarAssistant.Agent;
 /// The player's <c>my_grid_restore</c>. The model names the grid; the admin's restore rules fill in the placement
 /// and distances. Over the player's quota nothing happens. A restore runs at once only in <c>apply</c> mode and
 /// for a loss cause the admins allow; otherwise, or when Grid Backups finds no free spot, it becomes a proposal
-/// with the reason. A refusal from Grid Backups goes back to the player.
+/// with the reason. A refusal from Grid Backups goes back to the player, as does a grid with no backup of theirs.
 /// </summary>
 public sealed class GridRestores(
     IQuasarAuditLog audit,
@@ -103,7 +103,11 @@ public sealed class GridRestores(
                 return new($"Refused or failed (HTTP {result.StatusCode}): {result.Error}", true);
         }
 
-        var details = await DetailsAsync(agent, gridId, loss, rules, quota, token);
+        // An admin can only restore a backup the player owns, so without one there is nothing to propose.
+        var (backups, error) = await ReadAsync(agent, BackupsKey, new { gridId }, token);
+        if (error is not null)
+            return new("Refused: " + error, true);
+        var details = Details(gridId, loss, backups, rules, quota);
         var proposal = await proposals.CreateAsync(
             agent,
             tool.Operation!,
@@ -175,7 +179,7 @@ public sealed class GridRestores(
 
     private async Task<Loss?> LossAsync(ClaimsPrincipal agent, long gridId, CancellationToken token)
     {
-        var losses = await ReadAsync(agent, LossesKey, new { }, token);
+        var (losses, _) = await ReadAsync(agent, LossesKey, new { }, token);
         if (losses is not { } list || !list.TryGetProperty("losses", out var items))
             return null;
         foreach (var item in items.EnumerateArray())
@@ -196,16 +200,14 @@ public sealed class GridRestores(
     }
 
     /// <summary>What the approval card shows: the grid, the cause, the backup and the placement.</summary>
-    private async Task<List<string>> DetailsAsync(
-        ClaimsPrincipal agent,
+    private static List<string> Details(
         long gridId,
         Loss? loss,
+        JsonElement? backups,
         RestoreRules rules,
-        Quota quota,
-        CancellationToken token
+        Quota quota
     )
     {
-        var backups = await ReadAsync(agent, BackupsKey, new { gridId }, token);
         var name = loss?.Name ?? (backups is { } b ? Str(b, "name") : null);
         string? backup = null;
         if (backups is { } found && found.TryGetProperty("backups", out var list))
@@ -232,7 +234,8 @@ public sealed class GridRestores(
         ];
     }
 
-    private async Task<JsonElement?> ReadAsync(
+    /// <returns>The answer, or why core or Grid Backups refused; neither when the operation isn't there.</returns>
+    private async Task<(JsonElement? Value, string? Error)> ReadAsync(
         ClaimsPrincipal agent,
         string key,
         object request,
@@ -240,17 +243,29 @@ public sealed class GridRestores(
     )
     {
         if (_operations.FirstOrDefault(op => op.Key == key) is not { } operation)
-            return null;
-        var result = await ToolExecutor.DispatchAsync(
-            scopes,
-            agent,
-            operation,
-            JsonSerializer.SerializeToElement(request, Json),
-            token
+            return (null, null);
+        QuasarOperationResult result;
+        try
+        {
+            result = await ToolExecutor.DispatchAsync(
+                scopes,
+                agent,
+                operation,
+                JsonSerializer.SerializeToElement(request, Json),
+                token
+            );
+        }
+        // Core passes on what a handler throws, such as "The player is a big owner in no backup of this grid."
+        catch (Exception error) when (error is not OperationCanceledException)
+        {
+            return (null, error.Message);
+        }
+        if (result.Error is not null)
+            return (null, result.Error);
+        return (
+            result.Value is null ? null : JsonSerializer.SerializeToElement(result.Value, Json),
+            null
         );
-        return result.Error is null && result.Value is not null
-            ? JsonSerializer.SerializeToElement(result.Value, Json)
-            : null;
     }
 
     private static string? Reason(string error, string prefix) =>

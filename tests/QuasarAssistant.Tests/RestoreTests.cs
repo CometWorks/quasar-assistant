@@ -25,6 +25,17 @@ public sealed class RestoreTests
         public string? Cause { get; set; } = "destroyed";
         public Func<JsonElement, object?> Restore { get; set; } =
             _ => new { status = "restored", entityIds = new[] { 42 } };
+        public Func<JsonElement, object?> Backups { get; set; } =
+            _ => new
+            {
+                gridId = 42L,
+                name = "Miner",
+                backups = new[]
+                {
+                    new { takenUtc = "2026-11-05T11:30:00Z" },
+                    new { takenUtc = "2026-11-05T10:00:00Z" },
+                },
+            };
     }
 
     private static List<QuasarOperation> Operations(Grid grid) =>
@@ -47,19 +58,7 @@ public sealed class RestoreTests
                         ],
                 }
             ),
-            PlayerTests.PlayerRead(
-                "my.grid.backups",
-                _ => new
-                {
-                    gridId = 42L,
-                    name = "Miner",
-                    backups = new[]
-                    {
-                        new { takenUtc = "2026-11-05T11:30:00Z" },
-                        new { takenUtc = "2026-11-05T10:00:00Z" },
-                    },
-                }
-            ),
+            PlayerTests.PlayerRead("my.grid.backups", request => grid.Backups(request)),
             new TestOperation(
                 "my.grid.restore",
                 new QuasarOperationMetadata { Effect = QuasarOperationEffect.Change, Area = "my" },
@@ -283,6 +282,51 @@ public sealed class RestoreTests
         Assert.True(result.IsError);
         Assert.Equal("Refused: The grid is still in the world.", result.Text);
         Assert.Empty(harness.Audit.Proposals);
+    }
+
+    // Core passes the companion's answer on as an exception, as for a grid the player never owned.
+    private static object? NeverOwned(JsonElement _) =>
+        throw new InvalidOperationException("The player is a big owner in no backup of this grid.");
+
+    [Theory]
+    [InlineData(ToolMode.Apply)]
+    [InlineData(ToolMode.Propose)]
+    public async Task AGridWithoutABackupOfTheirsIsRefusedWithoutAProposal(ToolMode mode)
+    {
+        var (harness, _) = await StartAsync(new Grid { Cause = null, Backups = NeverOwned }, mode);
+        await using var _h = harness;
+
+        var result = await RestoreAsync(harness);
+
+        Assert.True(result.IsError);
+        Assert.Equal("Refused: The player is a big owner in no backup of this grid.", result.Text);
+        Assert.Null(result.ProposalId);
+        Assert.Empty(harness.Audit.Proposals);
+        Assert.Empty(harness.Services.GetRequiredService<HandoverStore>().Open);
+        // The model got the refusal and answered the player.
+        var owner = ConversationStore.PlayerPrefix + "steam:" + SteamId;
+        var conversation = harness.Conversations.Get(
+            owner,
+            harness.Conversations.List(owner)[0].Id
+        )!;
+        Assert.Equal("Done.", conversation.Messages[^1].Text);
+    }
+
+    [Fact]
+    public async Task AThrowingRestoreComesBackAsAToolError()
+    {
+        var grid = new Grid
+        {
+            Restore = _ => throw new InvalidOperationException("The companion is gone."),
+        };
+        var (harness, _) = await StartAsync(grid, ToolMode.Apply);
+        await using var _h = harness;
+
+        var result = await RestoreAsync(harness);
+
+        Assert.True(result.IsError);
+        Assert.Equal("Failed: The companion is gone.", result.Text);
+        Assert.Empty(harness.Services.GetRequiredService<HandoverStore>().Open);
     }
 
     [Fact]

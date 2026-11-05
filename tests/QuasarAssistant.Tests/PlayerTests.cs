@@ -107,6 +107,35 @@ public sealed class PlayerTests
     }
 
     [Fact]
+    public async Task AThrowingPlayerToolComesBackAsAToolError()
+    {
+        var operations = Operations();
+        operations[0] = PlayerRead(
+            "my.grids",
+            _ => throw new InvalidOperationException("No Grid Backups node answers.")
+        );
+        await using var harness = await Harness.StartAsync(operations, new ManualTime());
+        harness.UsePlayerBackends(Kind, "p");
+        harness.Server.Enqueue(
+            "p",
+            Replies.Answer(Kind, "", [new ToolCall("c1", "my_grids", "{}")]),
+            Replies.Answer(Kind, "Try again later.")
+        );
+        var ask = new PlayerAsk();
+
+        await harness.Players.HandleAsync(ask.Game("my grids?"), default);
+
+        Assert.Equal("Try again later.", ask.Replies[^1]);
+        Assert.Empty(harness.Services.GetRequiredService<HandoverStore>().Open);
+        var owner = ConversationStore.PlayerPrefix + "steam:76561198000000001";
+        var result = harness
+            .Conversations.Get(owner, harness.Conversations.List(owner)[0].Id)!
+            .Messages.Single(m => m.Role == ChatRole.Tool);
+        Assert.True(result.IsError);
+        Assert.Equal("Failed: No Grid Backups node answers.", result.Text);
+    }
+
+    [Fact]
     public async Task ActionLimitRefusesFurtherChanges()
     {
         await using var harness = await StartAsync();
