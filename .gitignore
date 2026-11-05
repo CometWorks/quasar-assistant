@@ -1,0 +1,57 @@
+# Build output
+[Bb]in/
+[Oo]bj/
+artifacts/
+publish/
+
+# Test and coverage output
+TestResults/
+coverage/
+*.coverage
+*.coveragexml
+*.trx
+
+# IDE/editor state
+.vs/
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.DotSettings.user
+_ReSharper*/
+
+# OS files
+.DS_Store
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Logs and diagnostics
+*.log
+logs/
+crashdumps/
+
+# Node/frontend output for plugins that add asset pipelines
+node_modules/
+dist/
+.npm/
+.pnpm-store/
+
+# NuGet/package output
+*.nupkg
+*.snupkg
+packages/
+
+# Quasar plugin packaging/cache output
+plugin-cache/
+plugin-package/
+*.zip
+*.tar.gz
+
+# Local environment/config overrides
+.env
+.env.*
+*.local.json

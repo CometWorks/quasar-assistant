@@ -1,0 +1,50 @@
+<span class="template-plugin-surface">
+    <button type="button" class="template-icon-button" title="@TooltipText" aria-label="@TooltipText" disabled="@(!CanViewEntity)" @onclick="HandleClick"><TemplateIcon Icon="@TemplateIcons.Extension" /></button>
+    @if (!string.IsNullOrWhiteSpace(_notice)) { <span class="template-action-notice" role="status">@_notice</span> }
+</span>
+
+@code
+{
+    private string _notice = string.Empty;
+
+    [Parameter]
+    public string? AgentId { get; set; }
+
+    [Parameter]
+    public string? ServerName { get; set; }
+
+    [Parameter]
+    public long EntityId { get; set; }
+
+    [Parameter]
+    public string? EntityType { get; set; }
+
+    [Parameter]
+    public string? EntitySubType { get; set; }
+
+    [Parameter]
+    public string? EntityDisplayName { get; set; }
+
+    [Parameter]
+    public ulong? OwnerSteamId { get; set; }
+
+    [Parameter]
+    public bool CanViewEntity { get; set; }
+
+    private string TooltipText => CanViewEntity
+        ? "Template entity action"
+        : "Entity is not viewable";
+
+    private void HandleClick()
+    {
+        if (!CanViewEntity) return;
+        var name = string.IsNullOrWhiteSpace(EntityDisplayName)
+            ? $"Entity {EntityId}"
+            : EntityDisplayName;
+        var server = string.IsNullOrWhiteSpace(ServerName)
+            ? AgentId ?? "unknown server"
+            : ServerName;
+
+        _notice = $"{name} on {server}: replace this action with plugin logic.";
+    }
+}

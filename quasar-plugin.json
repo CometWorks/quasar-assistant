@@ -1,0 +1,20 @@
+{
+  "id": "todo.template-plugin",
+  "displayName": "Template Plugin",
+  "version": "0.1.0",
+  "entryAssembly": "TemplatePlugin.Quasar.dll",
+  "entryType": "TemplatePlugin.Quasar.TemplateQuasarPlugin",
+  "projectPath": "src/TemplatePlugin.Quasar/TemplatePlugin.Quasar.csproj",
+  "staticAssets": "src/TemplatePlugin/wwwroot",
+  "stylesheets": [
+    "template-plugin.css"
+  ],
+  "quasarVersion": ">=1.1.0",
+  "companionPlugins": [
+    {
+      "id": "todo.template-plugin",
+      "projectPath": "src/TemplatePlugin.Magnetar/TemplatePlugin.Magnetar.csproj",
+      "entryAssembly": "TemplatePlugin.Magnetar.dll"
+    }
+  ]
+}

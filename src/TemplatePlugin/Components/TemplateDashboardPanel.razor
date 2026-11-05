@@ -1,0 +1,15 @@
+@implements IDisposable
+@inject TemplatePluginState PluginState
+
+<section class="template-plugin-surface template-panel">
+    <div class="template-row"><h2>Template Plugin</h2><TemplateIcon Icon="@TemplateIcons.Extension" /></div>
+    <p>Dashboard contribution placeholder.</p>
+    <p class="template-status">Refreshes: @PluginState.RefreshCount</p>
+    <a class="template-button" href="/template-plugin"><TemplateIcon Icon="@TemplateIcons.OpenInNew" />Open</a>
+</section>
+
+@code {
+    protected override void OnInitialized() => PluginState.Changed += Changed;
+    private void Changed() => _ = InvokeAsync(StateHasChanged);
+    public void Dispose() => PluginState.Changed -= Changed;
+}

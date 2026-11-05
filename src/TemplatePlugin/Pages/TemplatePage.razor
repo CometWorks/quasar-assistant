@@ -1,0 +1,20 @@
+@page "/template-plugin"
+@implements IDisposable
+@inject TemplatePluginState PluginState
+
+<PageTitle>Template Plugin</PageTitle>
+<div class="template-plugin-surface">
+    <header class="template-row"><h1>Template Plugin</h1><button type="button" class="template-button" @onclick="Refresh"><TemplateIcon Icon="@TemplateIcons.Refresh" />Refresh</button></header>
+    <p class="template-notice">Replace this page with the plugin's primary Quasar experience.</p>
+    <div class="template-grid">
+        <section class="template-panel"><h2>Main Panel</h2><p>Use semantic HTML controls and Quasar theme tokens for plugin UI.</p></section>
+        <section class="template-panel"><h2>Status</h2><span class="template-status">Ready</span><p>State created @PluginState.CreatedAtUtc.ToLocalTime().ToString("u")</p><p>Refresh count: @PluginState.RefreshCount</p></section>
+    </div>
+</div>
+
+@code {
+    protected override void OnInitialized() => PluginState.Changed += OnPluginStateChanged;
+    public void Dispose() => PluginState.Changed -= OnPluginStateChanged;
+    private void Refresh() => PluginState.Refresh();
+    private void OnPluginStateChanged() => _ = InvokeAsync(StateHasChanged);
+}

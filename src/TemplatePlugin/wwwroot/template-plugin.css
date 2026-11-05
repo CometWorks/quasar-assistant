@@ -1,0 +1,17 @@
+/* Scope plugin CSS and inherit the host's current appearance palette. */
+.template-plugin-surface { color: var(--quasar-palette-text-primary, #e6e9ee); font: 13px system-ui, sans-serif; }
+.template-plugin-surface h1 { font-size: 25px; margin: 0; }
+.template-plugin-surface h2 { font-size: 15px; margin: 0 0 12px; }
+.template-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
+.template-grid { display: grid; grid-template-columns: 2fr 1fr; gap: 16px; }
+.template-panel { background: var(--quasar-palette-surface, #181c21); border: 1px solid var(--quasar-palette-lines-default, #303740); border-radius: 6px; padding: 16px; }
+.template-notice { border-left: 3px solid var(--quasar-palette-info, #56c8dc); background: var(--quasar-palette-surface, #181c21); padding: 12px; }
+.template-status { color: var(--quasar-palette-success, #66bb6a); }
+.template-button, .template-icon-button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 7px 10px; font: inherit; color: var(--quasar-palette-primary, #56c8dc); background: var(--quasar-palette-surface, #181c21); border: 1px solid var(--quasar-palette-lines-default, #303740); border-radius: 4px; text-decoration: none; cursor: pointer; }
+.template-icon-button { padding: 5px; border-color: transparent; background: transparent; }
+.template-icon { width: 18px; height: 18px; flex: 0 0 18px; }
+.template-button:hover:not(:disabled), .template-icon-button:hover:not(:disabled) { background: var(--quasar-palette-hover-background, #ffffff12); }
+.template-button:disabled, .template-icon-button:disabled { opacity: .45; cursor: default; }
+.template-button:focus-visible, .template-icon-button:focus-visible { outline: 2px solid var(--quasar-palette-primary, #56c8dc); outline-offset: 2px; }
+.template-action-notice { display: block; font-size: 11px; white-space: normal; }
+@media (max-width: 700px) { .template-grid { grid-template-columns: minmax(0, 1fr); } }

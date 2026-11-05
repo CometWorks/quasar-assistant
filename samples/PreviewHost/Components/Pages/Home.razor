@@ -1,0 +1,17 @@
+@page "/"
+
+<PageTitle>Quasar Plugin Preview</PageTitle>
+<h1>Quasar Plugin Preview</h1>
+<p>This host renders native plugin components with Quasar appearance tokens.</p>
+<div class="preview-grid"><section class="preview-panel"><h2>Entity Action Preview</h2><div class="preview-table-scroll"><table class="preview-table"><thead><tr><th scope="col">Type</th><th scope="col">Entity ID</th><th scope="col">Name</th><th scope="col">Actions</th></tr></thead><tbody>@foreach (var entity in _entities) { <tr @key="entity.EntityId"><td>@entity.Type</td><td class="mono">@entity.EntityId</td><td>@entity.Name</td><td><TemplateEntityAction AgentId="preview-agent" ServerName="Preview Server" EntityId="@entity.EntityId" EntityType="@entity.Type" EntitySubType="@entity.SubType" EntityDisplayName="@entity.Name" CanViewEntity="@entity.CanView" /></td></tr> }</tbody></table></div></section><TemplateDashboardPanel /></div>
+
+@code
+{
+    private readonly PreviewEntity[] _entities =
+    [
+        new(281474976710681, "Grid", "LargeShip", "Template Freighter", true),
+        new(281474976710682, "Character", "Player", "Engineer", false),
+    ];
+
+    private sealed record PreviewEntity(long EntityId, string Type, string SubType, string Name, bool CanView);
+}

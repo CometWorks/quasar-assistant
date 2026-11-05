@@ -1,0 +1,15 @@
+{
+  "$schema": "http://json.schemastore.org/template",
+  "author": "CometWorks",
+  "classifications": [
+    "Quasar",
+    "Blazor",
+    "MudBlazor",
+    "Plugin"
+  ],
+  "identity": "CometWorks.Quasar.Plugin.Template",
+  "name": "Quasar UI Plugin",
+  "shortName": "quasar-plugin",
+  "sourceName": "TemplatePlugin",
+  "preferNameDirectory": true
+}
