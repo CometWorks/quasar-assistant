@@ -1,0 +1,255 @@
+# First setup
+
+This page covers the first steps after installing Quasar: giving yourself administrator access, opening the web UI, signing in with Steam, creating the first server with the setup wizard, and importing an existing vanilla Dedicated Server (DS) or Torch server. Installation itself is on [InstallLinux.md](InstallLinux.md), [InstallWindows.md](InstallWindows.md) and [Docker.md](Docker.md).
+
+Post-install access setup starts at `/setup` on the configured Quasar address.
+Guided installers open it after installation and health checks; manual installs
+can open it after starting Quasar. It uses the same administrator/access dialog
+as **Security → Manage access setup**. A saved self-deploy choice completes setup
+and opens Security. Hosted setup completes only after activation and fresh
+matching tunnel/application health. The existing private enrollment file retains
+completion across restarts and repeat installs. Pending, cancelled or failed
+attempts remain resumable and may prompt again; completion stops automatic prompts.
+Cancellation preserves private identity and does not cancel a paid subscription.
+Existing saved choices remain compatible. Explicit reopening is always available.
+
+## Open the web UI
+
+With the shipped `appsettings.json` the UI listens on all interfaces on port `8080`. On the Quasar machine open `http://127.0.0.1:8080`; from another machine use `http://<quasar-host>:8080`. The guided installers end with the address, and a foreground run prints it. To change the port or the listen address see [Configuration](Configuration.md#web-ui-address-and-port).
+
+The installed services never open a browser. A foreground run (`Quasar serve --foreground`) opens one when a desktop session is available (see [Configuration](Configuration.md#browser-launch)).
+
+For a remote Linux server, forward the local UI with
+`ssh -L 8080:127.0.0.1:8080 <user>@<quasar-host>` and open
+`http://localhost:8080/setup`; use the configured port if different.
+
+## Choose public access
+
+A first interactive administrator session shows **Set up administrator access**. If no subject or claim mapping grants the admin role, its first step asks for your **Administrator SteamID64 or profile URL**. Enter a 17-digit ID or a Steam Community URL such as `https://steamcommunity.com/id/rex00991/` or `https://steamcommunity.com/profiles/76561198000000000/`. **Save administrator and continue** resolves vanity URLs automatically without an API key and saves only the numeric ID to `rbac.json` before showing **Self-deploy** and **Use hosted panel**. Invalid input or a failed lookup saves nothing; retry or enter the numeric ID if Steam is unavailable. Existing administrator mappings skip this step. See [The first administrator](AccessControl.md#the-first-administrator).
+
+Select **Self-deploy** or **Use hosted panel**, then choose **Next**. **Back** returns from the hosted settings and keeps the name you entered. **Cancel** closes setup without configuring public access; setup comes back on the next page load while no admin is configured. Headless startup is not blocked. Reopen setup at **Security → Manage access setup**. See [Hosted access](HostedPanel.md) for automatic enrollment and its current availability.
+
+Before you save the administrator, setup explains that the panel refreshes to apply permissions. A brief reconnect message after saving is expected, including with WebRTC. Your mapping is saved before the refresh.
+
+Starting hosted enrollment switches the dialog to a progress screen with live updates and **Cancel** as its only button while connecting. **Open Quasar dashboard** appears once the hosted panel is active and its connection checks pass, and opens the dashboard in the current tab. **Self-deploy** appears only on the access-method screen, never on later hosted steps or when reopening a completed enrollment. Canceling setup does not cancel a paid subscription.
+
+## Set the first administrator
+
+Quasar access is controlled by roles (`viewer`, `editor`, `admin`) mapped to SteamID64 values in `rbac.json`. A fresh install has no mappings, so a Steam sign-in alone gives no access. There are three ways to get the first admin in place. Details on roles are in [Access control](AccessControl.md).
+
+### Option 1: open the UI on the Quasar machine itself
+
+By default Quasar trusts requests from loopback (`127.0.0.1`, `::1`) and gives them the `admin` role without a Steam sign-in. Open `http://127.0.0.1:8080` in a browser on the machine that runs Quasar and enter your SteamID64 or profile URL in the administrator setup step. You can also go to **Security** and add it with the `admin` role under **Runtime Subject Role Mappings**. The top bar shows "Trusted network" as the user name in this mode. Setup rechecks security-management permission before saving, including after a profile lookup; a remote Steam sign-in alone cannot claim an unconfigured panel.
+
+Private LAN clients are also trusted by default. For example, a browser on
+`192.168.1.10` can open `http://192.168.1.80:8080` when Quasar runs at
+`192.168.1.80`. Private IPv4 ranges (`10/8`, `172.16/12`, `192.168/16`),
+IPv6 ULA (`fc00::/7`), and directly attached IPv4 subnets are accepted.
+Turn off **Trust private LAN access** on Security to opt out
+(`Quasar:Auth:TrustedNetworkBypass:AllowSameSubnet: false`). An explicit saved
+`false` keeps LAN bypass disabled. Loopback has its separate `AllowLoopback` switch.
+Both bypasses require an accepted destination and same-origin browser context;
+reverse proxies also need correctly configured forwarding. See
+[trusted-network bypass](AccessControl.md#trusted-network-bypass).
+
+### Option 2: create `rbac.json` by hand
+
+Create `rbac.json` in the Quasar data directory, next to `appsettings.json`. Replace the subject with your 17-digit SteamID64:
+
+```json
+{
+  "subjectRoleMappings": [
+    { "provider": "Steam", "subject": "76561198000000000", "roles": ["admin"] }
+  ],
+  "claimRoleMappings": [],
+  "policyOverrides": {}
+}
+```
+
+Typical locations:
+
+| Install | `rbac.json` path |
+| --- | --- |
+| Linux | the install directory, `~/.local/share/Quasar/rbac.json` for the guided installer (the folder set as `QUASAR_INSTALL_DIR` in the unit) |
+| Windows, guided install | the data folder, `%ProgramData%\Quasar\rbac.json` by default. Only Administrators and the service accounts can open it, so use an elevated editor. |
+| Windows, `install.ps1` without `-DataDir` | the folder Quasar was extracted to and installed from, for example `C:\quasar\Quasar\rbac.json` |
+| Docker Compose | `./quasar-data/rbac.json` on the host (`/data/rbac.json` in the container) |
+
+Quasar watches `rbac.json`, so a running instance picks up the change without a restart.
+
+### Option 3: `QUASAR_ADMIN_STEAM_ID`
+
+Set the environment variable `QUASAR_ADMIN_STEAM_ID` to your SteamID64 before Quasar starts. When `rbac.json` does not exist, Quasar creates it with that SteamID as `admin`. When `rbac.json` already exists, Quasar ignores the variable and never overwrites the file. The Docker Compose file requires this variable (set it in `.env`).
+
+If the value is not exactly 17 digits, Quasar fails to start with `QUASAR_ADMIN_STEAM_ID must be a 17-digit SteamID64.` (only when `rbac.json` is missing, because that is the only time Quasar reads it).
+
+The Quasar admin role controls access to Quasar only. It is separate from the `Administrators` list of a Space Engineers server, which lives in the config profile (see [Config profiles](ConfigProfiles.md)).
+
+## Sign in with Steam
+
+Click the sign-in icon in the top bar (or open `/login`). Quasar sends you to the Steam OpenID login page and back. After sign-in the top bar shows your SteamID64 next to the sign-out icon (tooltip "Sign out Steam <SteamID>"). The sign-out button submits an antiforgery-protected logout request.
+
+- The session cookie is `Quasar.Auth`. It lasts 12 hours and renews while you use the UI.
+- A Steam account without a role mapping gets the page "You are signed in, but this account has no Quasar role." It has **Sign out** and **Retry Steam sign-in** buttons. Ask an admin to add your SteamID, then sign in again.
+- Role changes apply on the next request; you do not have to sign out.
+
+## Dashboard prompts on first start
+
+The **Dashboard** (`/`) shows two things before the first server exists:
+
+- **Data Handling Consent** with **YES** and **NO** buttons. The choice controls Magnetar statistics, diagnostic reports to CometWorks and server listings. Until you choose, sharing stays off. You can change it later on the **Security** page. See [Diagnostics](Diagnostics.md).
+- Preparation feedback for **SteamCMD**, **Dedicated Server** and **Magnetar**. In the first-world step this appears beside **Choose DS World** and explains the automatic checks, downloads and validation. Other Dashboard views use the **Managed Runtime** panel. Downloads and validation show SteamCMD percentages when available, plus elapsed time. The first run can take several minutes. Server starts remain blocked until the required runtime is ready. Failed steps show the error, troubleshooting guidance and **Retry preparation** (or **Retry** in Managed Runtime). Retrying requires server-edit permission and keeps your setup choices.
+
+## The first-server dialog
+
+When no server or cluster exists, the Dashboard opens **Set Up First Server**. It
+remembers the chosen flow in this browser and resumes it after refresh, including
+after a server has been created. Clicking outside the dialog or pressing Escape
+does not dismiss it. Use **Skip setup**, **Cancel**, or the close button to stop;
+use **Done** or **Close** when finished. Background refreshes never dismiss setup.
+
+- **Single Magnetar**: continues in the inline **First Setup** wizard on the Dashboard.
+- **Cluster**: on Linux, with cluster-management permission, opens [guided cluster setup](ClusterSetup.md). The Dashboard keeps a **Continue cluster setup** panel until explicitly skipped or closed. It links to controls once a cluster is deployed.
+- **Import Existing Server**: continues in the same dialog with the importer (see below).
+
+The dialog needs both the `CanEditServers` and `CanEditConfigs` permissions (roles `editor` or `admin`). Viewers do not see it. Later you can reopen it from **Setup guide** (all available choices) or **Import server** (import only). Refreshing during import returns to source selection so the source is read again and its stopped state must be confirmed again. After a completed import, refresh resumes the server setup guide instead of starting another import. **New server** separately opens the server-kind chooser, where **Cluster** stays visible but grayed out on Windows with a Linux requirement explanation.
+
+## Create a new server with the wizard
+
+The **First Setup** wizard has five steps and a progress bar ("Step N of 5"). It
+remembers the selected world and a step chosen with **Back**. **Next** advances
+through reviewed, completed steps. The guide uses saved worlds,
+profiles and servers to resume progress. Creating a server or finishing startup
+does not close it. **Skip setup** explicitly dismisses it; **Close** finishes it
+after the agent connects.
+
+1. **Create world template**. Click **Choose DS World** and pick one of the worlds shipped with the Dedicated Server. Quasar copies it into its managed world template storage. The button stays disabled until Dedicated Server files are installed and validated. Magnetar can still be preparing when you choose a world. The chooser searches in the background and checks again automatically when the Dedicated Server becomes ready. Choose **Use this world**; copy progress shows completed files. If no worlds appear, expand **Where Quasar looked**, check folder access, use **Updates > Check Dedicated Server**, then **Refresh**. **Custom import** accepts an existing save folder containing `Sandbox.sbc`.
+2. **Create matching config profile**. Click **Create From World**. Quasar builds a config profile from the template's `Sandbox_config.sbc`, so session settings and mods match the world. Workshop mod dependencies are resolved and added. Online Mode is not copied: new profiles start as Public. If a profile was already created from this template, the step shows as done and the button reads **Review Config Profile**.
+3. **Create server**. Click **Create Server**. The server editor opens with the template and the matching profile preselected. Fill in the identity and ports, then use **Create From Template** next to **World save** to create the server's save from the template. See [Servers](Servers.md).
+4. **Start server**. A **Start <server>** button appears for each stopped server. It is disabled until the managed runtime is ready and the server has a world save.
+5. **Wait for Quasar.Agent**. The wizard waits until the agent inside the server connects and reports data. Then **Close** finishes the wizard.
+
+More on templates and profiles is in [Config profiles](ConfigProfiles.md).
+
+## Import an existing vanilla DS or Torch server
+
+To import only a world into an already managed server, use **Worlds > Server worlds >
+Import World...** instead. It accepts a folder or browser-uploaded ZIP, retains
+the old save and does not create a template. See [direct world import](ConfigProfiles.md#importing-a-world-directly-to-a-server).
+
+The importer turns an existing server's world and `SpaceEngineers-Dedicated.cfg` into a Quasar server, a config profile and world templates. Stop the source server first. Choose **Server Folder** to read a folder on the Quasar machine (**Browse** shows that machine's file system), or **Upload ZIP** to choose a `.zip` from your PC. Both the first-server wizard and **Import server** support these sources.
+
+### Steps
+
+Discovery and import show an operation loader with elapsed time and next-step guidance. Large saves can take several minutes. Keep the source server stopped throughout import.
+
+1. **Source type**: choose **Vanilla Dedicated Server** or **Torch**.
+2. **Location and transfer mode**:
+   - Vanilla: select the DS app-data folder that contains `SpaceEngineers-Dedicated.cfg`, or a folder up to two levels above it. If Quasar finds more than one config, it uses the first and warns "Import instances separately to choose another."
+   - Torch: select the folder that contains `Torch.cfg` (its parent also works). Quasar looks for `SpaceEngineers-Dedicated.cfg` in that folder, in its `Instance` subfolder and in the `InstancePath` from `Torch.cfg`.
+   - For **Upload ZIP**, include one server instance with its config and `Saves` folder. A Torch ZIP also needs `Torch.cfg` and the instance folder. Files can be at the ZIP root or inside an enclosing folder. The ZIP must contain exactly one `SpaceEngineers-Dedicated.cfg` for vanilla imports, or exactly one `Torch.cfg` for Torch imports.
+   - For **Server Folder**, choose **Copy** (source world folders stay unchanged) or **Move** (selected source world folders are deleted after a successful import). ZIP uploads always copy and leave the ZIP on your PC unchanged. Click **Analyze**.
+3. **Analyze and select**: review warnings, set the **Quasar display name** and **Quasar identifier**, tick the worlds to import, pick the **Primary managed world** and choose which settings to transfer.
+4. **Confirm**: tick **I confirm source server is stopped** and click **Import**.
+
+Quasar reads the ZIP index from your browser and validates the server configuration before transferring world data. It copies only `Torch.cfg` when needed, the chosen instance's `SpaceEngineers-Dedicated.cfg` and the detected worlds. World checkpoints are validated before terrain and mod-storage files transfer. All detected worlds are read for review; you choose which to keep on the next step. Runtime binaries, plugins, logs, caches, unrelated worlds and each world's `Backup` folder stay on your PC. Quasar requests ZIP metadata and needed file ranges without storing a complete copy of the ZIP. Index and header reads can include a small amount of neighboring data.
+
+Transfers show progress and offer **Cancel upload**. Limits are 10 GiB transferred, including ZIP metadata, 50 GiB of required extracted files, 100,000 archive entries and 16 MiB per server configuration. The ZIP on your PC can be larger than 10 GiB. Quasar rejects unsafe paths, links and case-conflicting names before file contents transfer. Uploaded configs can only refer to files inside the extracted server folder. Temporary files are removed after success, cancellation or closing the importer; they remain available when you use **Back** to review the same upload.
+
+Quasar finds worlds as folders containing `Sandbox.sbc`: the world named in the config's `LoadWorld` and every folder under `Saves`. The world from `LoadWorld` is marked **active** and preselected as primary. `LoadWorld` paths written on Windows, including Wine `Z:` paths, are resolved on Linux; if the path does not exist, Quasar looks for a folder with the same name under `Saves`.
+
+### What Quasar creates
+
+- One world template per selected world. The primary world also becomes the new server's world save (named after the server identifier). Each world's `Backup` subfolder is not copied.
+- One config profile named "<display name> Imported".
+- One server definition, stopped (goal state Off, auto start off). The success message reads "Imported server '<name>'. Review it before starting."
+
+If the import fails part way, Quasar removes what it created (server, profile, templates). In Move mode, source folders are deleted only after everything is committed; if a folder cannot be deleted the import still succeeds and reports a warning.
+
+### What transfers
+
+Each category is a checkbox, all on by default:
+
+| Checkbox | What Quasar copies |
+| --- | --- |
+| Server and world names | DS `ServerName` and `WorldName` into the server's in-game server and world names |
+| Network, online mode, IP and port | listen IP, server port, cross-play and network type settings, and the world's online mode |
+| Server options and MOTD | other root settings of `SpaceEngineers-Dedicated.cfg` |
+| Admins, reserved, bans and GroupID whitelist | `GroupID`, `Administrators`, `Reserved`, `Banned` |
+| Gameplay and world settings | session settings from the primary world's `Sandbox_config.sbc` (from the DS config if the world has none), except online mode |
+| World Workshop mods | the mod list of the primary world |
+| Torch crash-restart policy (Torch only) | Torch `RestartOnCrash` into the server's restart-on-crash setting |
+
+With a category off, Quasar uses its own defaults: listen IP `0.0.0.0` and port `27016`, empty in-game names, restart on crash on. If another Quasar server already uses the port, Quasar picks the next free one and warns "Port N was already used by Quasar; imported server uses M."
+
+With **Network** selected, the world's online mode is copied as is, including Offline. Check it before starting (see [Config profiles](ConfigProfiles.md)).
+
+### What does not transfer
+
+- **Server password.** The DS stores only a one-way hash, so Quasar cannot copy it. Set a new password in the imported config profile.
+- **Torch plugins.** Torch plugins are not Magnetar plugins; Quasar reports how many it found and skips them. Install Magnetar plugins instead ([Plugins](Plugins.md)).
+- **Torch whitelist.** Torch's own whitelist has no DS or Magnetar equivalent. The DS `GroupID` whitelist, admins, reserved slots and bans are imported separately.
+- **Torch Autostart.** The imported server stays stopped until you start it.
+- The old DS or Torch install, its config, plugins and logs. Move mode leaves them in place for recovery.
+
+## Common problems
+
+| Message | Cause and fix |
+| --- | --- |
+| `SpaceEngineers-Dedicated.cfg not found in '<path>' or its first two folder levels.` | Wrong folder for a vanilla import. Select the DS app-data folder (the one with `SpaceEngineers-Dedicated.cfg` and `Saves`). |
+| `Torch.cfg not found in '<path>'. Select Torch's root folder.` | Select the Torch install folder. |
+| `Torch instance SpaceEngineers-Dedicated.cfg not found below '<path>'.` | The Torch instance folder has no DS config. Check `InstancePath` in `Torch.cfg`. |
+| `No world folders containing Sandbox.sbc found under '<path>'.` | No valid world in `LoadWorld` or `Saves`. |
+| `Cannot move source world '<path>' because it is already inside Quasar storage.` | The source is inside the Quasar data folder. Use Copy. |
+| `Cannot move symlinked source world '<path>'. Use Copy mode.` / `... because it is also a source server root. Use Copy mode.` | Move only deletes plain world folders. Use Copy. |
+| `Managed world target already exists: <path>` | A save folder with that name already exists for the server. Choose another identifier. |
+| "this account has no Quasar role" after Steam sign-in | No mapping for your SteamID in `rbac.json`. Use one of the options in [Set the first administrator](#set-the-first-administrator). |
+| `QUASAR_ADMIN_STEAM_ID must be a 17-digit SteamID64.` at startup | Fix or remove the variable. |
+| Choose DS World or Start buttons disabled | The managed Dedicated Server download is not finished, or the server has no world save. Check preparation feedback beside the world choice or in the Managed Runtime panel. |
+
+## Sources
+
+- `Quasar/Components/Pages/PostInstallSetup.razor`
+- `Quasar/Components/Shared/AccessSetupPrompt.razor`
+- `Quasar/Components/Shared/DedicatedServerSetupStatus.razor`
+- `Quasar/Components/Pages/WorldTemplateQuickImportDialog.razor`
+- `Quasar/Services/WorldTemplateImportLocationService.cs`
+- `Quasar/Services/ManagedDedicatedServerRuntimeResolver.cs`
+- `Quasar/Components/Pages/NewServerDialog.razor`
+- `Quasar/Services/ServerManagementActions.cs`
+- `Docs/QuickStart.md`
+- `Docs/Docker.md`
+- `Docs/Configuration.md`
+- `.env.example`
+- `docker-compose.yml`
+- `install.sh`
+- `scripts/install.ps1`
+- `Quasar/Program.cs`
+- `Quasar/appsettings.json`
+- `Quasar/Components/Pages/Home.razor`
+- `Quasar/Components/Pages/ExistingServerImportDialog.razor`
+- `Quasar/Components/Pages/ServerEditorDialog.razor`
+- `Quasar/Components/Pages/WorldTemplateConfigProfileDialog.razor`
+- `Quasar/Components/Pages/Security.razor`
+- `Quasar/Components/Layout/MainLayout.razor`
+- `Quasar/Components/Shared/AccessSetupDialog.razor`
+- `Quasar/Services/ExistingServerImportService.cs`
+- `Quasar/Services/WorldSaveFiles.cs`
+- `Quasar/Services/BrowserZipFileStream.cs`
+- `Quasar/wwwroot/server-import-file.js`
+- `Quasar/Services/QuasarWorldTemplateCatalog.cs`
+- `Quasar/Services/WorldSandboxConfigEditor.cs`
+- `Quasar/Services/ManagedRuntimeWarmupService.cs`
+- `Quasar/Services/Auth/RbacConfigCatalog.cs`
+- `Quasar/Services/Auth/SteamProfileClient.cs`
+- `Quasar/Services/Auth/RbacConfig.cs`
+- `Quasar/Services/Auth/QuasarRoleMapper.cs`
+- `Quasar/Services/Auth/QuasarAuthConstants.cs`
+- `Quasar/Services/Auth/TrustedNetworkEvaluator.cs`
+- `Quasar/Models/QuasarConfigProfile.cs`
+- `Quasar/Services/BrowserLauncher.cs`
+- `Quasar/Services/WebServiceManifestHostedService.cs`
+- `scripts/install-gui.ps1`
+- `scripts/install-gui.sh`
+- `Magnetar.Protocol/Runtime/MagnetarPaths.cs`
+- `Quasar/Components/Pages/WorldTemplates.razor`
