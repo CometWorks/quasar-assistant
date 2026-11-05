@@ -95,11 +95,7 @@ public sealed partial class ToolCatalog(
     public static IEnumerable<QuasarOperation> OfRole(
         IEnumerable<QuasarOperation> available,
         string roleName
-    ) =>
-        available.Where(op =>
-            op.PluginId == McpRegistry.PluginId
-            || IsPlayerOperation(op) == (roleName == AssistantRoles.Player)
-        );
+    ) => available.Where(op => IsPlayerOperation(op) == (roleName == AssistantRoles.Player));
 
     /// <param name="canAct">False for a player without an agent principal (Discord without a link): no
     /// operation or MCP tools then.</param>
@@ -190,7 +186,7 @@ public sealed partial class ToolCatalog(
                 };
                 tools.Add((tool, Describe(tool), Schema(operation)));
             }
-            AddMcpTools(tools, role, available, mcpTools);
+            AddMcpTools(tools, role, roleName, available, mcpTools);
         }
         tools.Add(Local("skills_list", ToolKind.SkillsList, SkillsListText, Empty));
         tools.Add(Local("docs_search", ToolKind.DocsSearch, DocsSearchText, DocsSearchSchema));
@@ -217,15 +213,17 @@ public sealed partial class ToolCatalog(
     private static void AddMcpTools(
         List<(AgentTool, string, JsonElement)> tools,
         RoleSettings role,
+        string roleName,
         IReadOnlyList<QuasarOperation> available,
         IReadOnlyList<McpTool> mcpTools
     )
     {
+        // Each role calls its MCP servers through its own pair of operations.
         var read = available.FirstOrDefault(op =>
-            op.Key == McpRegistry.PluginId + "/" + McpRegistry.ReadOperation
+            op.Key == McpRegistry.PluginId + "/" + McpRegistry.ReadOperation(roleName)
         );
         var call = available.FirstOrDefault(op =>
-            op.Key == McpRegistry.PluginId + "/" + McpRegistry.CallOperation
+            op.Key == McpRegistry.PluginId + "/" + McpRegistry.CallOperation(roleName)
         );
         foreach (var mcpTool in mcpTools)
         {

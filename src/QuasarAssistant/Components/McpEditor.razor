@@ -3,11 +3,7 @@
 @inject SettingsStore Store
 
 <h3>MCP servers</h3>
-<p class="assistant-hint">Remote MCP servers over streamable HTTP. Their tools are fetched when you save and when Quasar starts. Tools you mark read-only follow the mode of <code>quasar.assistant/mcp.read</code>; every other tool is always a proposal and can't be undone. Calls go through Quasar, which checks the <code>mcp.read</code> and <code>mcp.call</code> operations' access rules (server control by default).</p>
-@if (Role == AssistantRoles.Player)
-{
-    <p class="assistant-notice">The player agent holds no access role, so Quasar refuses its MCP calls under the default rule of server control. Player MCP tools only work once Quasar offers a rule the player agent can meet.</p>
-}
+<p class="assistant-hint">Remote MCP servers over streamable HTTP. Their tools are fetched when you save and when Quasar starts. Tools you mark read-only follow the mode of <code>quasar.assistant/@McpRegistry.ReadOperation(Role)</code>; every other tool is always a proposal and can't be undone. Calls go through Quasar as the <code>@McpRegistry.ReadOperation(Role)</code> and <code>@McpRegistry.CallOperation(Role)</code> operations, so they are checked and audited.</p>
 @foreach (var server in Servers)
 {
     var status = server.Original is null ? null : Registry.Status(Role, server.Original);

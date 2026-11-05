@@ -63,39 +63,60 @@ public static class AssistantServiceCollectionExtensions
     }
 
     /// <summary>
-    /// MCP calls go through core so they are checked and audited like any operation. The handlers only accept
-    /// the assistant's agents, for a server and tool set up for the agent's role. An acting MCP tool can't be
-    /// undone, so it is always a proposal.
+    /// MCP calls go through core so they are checked and audited like any operation. Each role has its own pair:
+    /// the admin assistant's under server control, the player agent's under <c>CanActAsPlayer</c>, which only the
+    /// player agent meets. A handler accepts only its role's agent, for a server and tool set up for that role.
+    /// An acting MCP tool can't be undone, so it is always a proposal.
     /// </summary>
     private static void AddMcpOperations(IServiceCollection services)
     {
-        string[] policies = [QuasarPolicyNames.CanControlServers];
+        AddMcpOperations(
+            services,
+            AssistantRoles.Admin,
+            QuasarPolicyNames.CanControlServers,
+            "the assistant's settings"
+        );
+        AddMcpOperations(
+            services,
+            AssistantRoles.Player,
+            QuasarPolicyNames.CanActAsPlayer,
+            "the player support settings"
+        );
+    }
+
+    private static void AddMcpOperations(
+        IServiceCollection services,
+        string role,
+        string policy,
+        string where
+    )
+    {
         var deadline = TimeSpan.FromSeconds(120);
         services.AddQuasarOperation<McpCall, JsonNode?>(
             McpRegistry.PluginId,
-            McpRegistry.ReadOperation,
-            policies,
+            McpRegistry.ReadOperation(role),
+            [policy],
             (context, request, token) =>
                 context
                     .Services.GetRequiredService<McpRegistry>()
-                    .CallAsync(context.User, request, readOnly: true, token),
+                    .CallAsync(context.User, role, request, readOnly: true, token),
             new QuasarOperationMetadata
             {
                 Effect = QuasarOperationEffect.Read,
                 Area = "mcp",
                 Deadline = deadline,
                 Description =
-                    "Calls a tool an admin marked read-only on a remote MCP server set up in the assistant's settings.",
+                    $"Calls a tool an admin marked read-only on a remote MCP server set up in {where}.",
             }
         );
         services.AddQuasarOperation<McpCall, JsonNode?>(
             McpRegistry.PluginId,
-            McpRegistry.CallOperation,
-            policies,
+            McpRegistry.CallOperation(role),
+            [policy],
             (context, request, token) =>
                 context
                     .Services.GetRequiredService<McpRegistry>()
-                    .CallAsync(context.User, request, readOnly: false, token),
+                    .CallAsync(context.User, role, request, readOnly: false, token),
             new QuasarOperationMetadata
             {
                 Effect = QuasarOperationEffect.Change,
@@ -103,7 +124,7 @@ public static class AssistantServiceCollectionExtensions
                 Reversal = QuasarReversal.NotReversible,
                 Deadline = deadline,
                 Description =
-                    "Calls a tool on a remote MCP server set up in the assistant's settings. What it does can't be undone from Quasar.",
+                    $"Calls a tool on a remote MCP server set up in {where}. What it does can't be undone from Quasar.",
             }
         );
     }
@@ -131,7 +152,8 @@ internal sealed class AssistantMaintenance(
             {
                 conversations.Expire(settings.Current.ConversationRetentionDays);
                 await proposals.ExpireAsync(token);
-                handovers.Forget(time.GetUtcNow().AddDays(-settings.Current.ProposalExpiryDays));
+                var expired = time.GetUtcNow().AddDays(-settings.Current.ProposalExpiryDays);
+                handovers.Forget(expired);
             }
             catch (Exception error) when (error is not OperationCanceledException)
             {

@@ -22,8 +22,15 @@ public sealed record McpServerStatus(DateTimeOffset Time, int Tools, string? Err
 public sealed class McpRegistry
 {
     public const string PluginId = "quasar.assistant";
-    public const string ReadOperation = "mcp.read";
-    public const string CallOperation = "mcp.call";
+
+    /// <summary><c>mcp.read</c> for the admin assistant, <c>mcp.player.read</c> for the player agent.</summary>
+    public static string ReadOperation(string role) =>
+        role == AssistantRoles.Player ? "mcp.player.read" : "mcp.read";
+
+    /// <summary><c>mcp.call</c> for the admin assistant, <c>mcp.player.call</c> for the player agent.</summary>
+    public static string CallOperation(string role) =>
+        role == AssistantRoles.Player ? "mcp.player.call" : "mcp.call";
+
     private static readonly TimeSpan ListTimeout = TimeSpan.FromSeconds(30);
 
     private readonly SettingsStore _settings;
@@ -122,18 +129,25 @@ public sealed class McpRegistry
         }
     }
 
-    /// <summary>The handler of both operations. Only an agent calls them, for a server and tool of its role.</summary>
+    /// <summary>The handler of the MCP operations of <paramref name="role"/>. Only that role's agent calls
+    /// them, for a server and tool set up for the role.</summary>
     public async Task<JsonNode?> CallAsync(
         ClaimsPrincipal user,
+        string role,
         McpCall request,
         bool readOnly,
         CancellationToken token
     )
     {
-        if (!user.IsQuasarAgent(out var agent))
-            throw new QuasarOperationException(403, "Only the assistant's agents call MCP tools.");
-        var role =
-            agent.Kind == QuasarAgentKind.Player ? AssistantRoles.Player : AssistantRoles.Admin;
+        var kind =
+            role == AssistantRoles.Player ? QuasarAgentKind.Player : QuasarAgentKind.Assistant;
+        if (!user.IsQuasarAgent(out var agent) || agent.Kind != kind)
+            throw new QuasarOperationException(
+                403,
+                role == AssistantRoles.Player
+                    ? "Only the player agent calls the player's MCP tools."
+                    : "Only the admin assistant calls the admins' MCP tools."
+            );
         var server =
             _settings
                 .Current.Role(role)
