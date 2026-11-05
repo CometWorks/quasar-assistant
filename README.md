@@ -35,8 +35,10 @@ admins set up. No provider or model ships with it.
   `skills_list`, `docs_search` and `skill_read`; none of it is in the prompt until they do. Players get the
   book only when the admins allow it.
 - **MCP servers.** Each role can have remote MCP servers (streamable HTTP; no local servers). Their tools
-  appear as `mcp_<server>_<tool>`. Every call goes through Quasar's `quasar.assistant/mcp.read` or
-  `mcp.call` operation, so it is checked and audited. Tools the admins mark read-only follow the read mode;
+  appear as `mcp_<server>_<tool>`. Every call goes through a Quasar operation, so it is checked and audited:
+  `quasar.assistant/mcp.read` and `mcp.call` for the admin assistant (server control by default), and
+  `mcp.player.read` and `mcp.player.call` for the player agent (`CanActAsPlayer`, which only the player agent
+  meets). Each handler accepts only its own role's agent. Tools the admins mark read-only follow the read mode;
   any other MCP tool is always a proposal and can't be undone.
 - **Data.** Tool results have passwords, tokens and keys replaced by `<redacted>` and are cut to 16 KiB.
   Conversations are kept per person and deleted 30 days after their last message.
@@ -61,7 +63,9 @@ last step:
 Quasar builds the player agent from the game session or the Discord link, and its `my.*` operations only
 reach that player's own things. Changes the player agent makes or proposes count against 3 actions a day.
 When every backend fails, the player hears that the assistant is unavailable and the admins get a hand-over.
-`ask_admin` hands the conversation to the admins: it is listed on the Approvals page, pushed to the admins
+When an admin approves or rejects one of the player's proposals, or it expires, the player is told at the
+start of their next request, before the model runs. Quasar can't message a player outside a request, so
+nothing reaches them sooner. `ask_admin` hands the conversation to the admins: it is listed on the Approvals page, pushed to the admins
 who control servers and posted in the admin Discord channel. A player's conversation follows them across
 cluster nodes and starts over after two hours without a message.
 
@@ -96,7 +100,7 @@ use `/ask`. New proposals and hand-overs can be posted to the admin channel with
 | `/assistant/approvals` | `CanUseAssistant` | Players waiting for an admin, pending and decided proposals. Marking a hand-over handled needs `CanControlServers`. |
 | `/assistant/settings` | `CanManageSecurity` | Backends and API keys; per role the backend order, modes, limits, MCP servers and skills; player support and restore rules; notifications, Discord and usage. |
 
-The plugin registers no endpoints and only the two MCP operations, which accept nothing but the assistant's
+The plugin registers no endpoints and only the four MCP operations, which accept nothing but the assistant's
 own agents. Nothing an agent or a script can call reaches its settings.
 
 ## Data folder
@@ -111,6 +115,7 @@ Everything lives in `plugin-data/quasar.assistant/` in the Quasar data folder:
 | `conversations/<asker>/<id>.json` | One file per conversation. |
 | `proposals.json` | The plugin's proposal records; Quasar's audit log holds the proposals themselves. |
 | `handovers.json` | Players handed to the admins. |
+| `player-outbox.json` | Decisions on players' proposals they haven't heard yet, kept as long as proposals. |
 | `player-usage.json` | Per player: request and action times of the last day, and when the privacy notice was sent. |
 | `skills/admin/*.md`, `skills/player/*.md` | The admins' skills per role. |
 | `metrics.jsonl` | One line per run: role, backends, fallovers, failures, turns, tokens (cached and processed), duration. No message text. |

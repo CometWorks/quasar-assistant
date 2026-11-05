@@ -8,12 +8,14 @@ namespace QuasarAssistant.Players;
 
 /// <summary>
 /// Answers players: <c>!ask</c> in game and <c>/ask</c> on Discord. In order, and no model runs before the last
-/// step: off → a fixed reply; over a limit → a fixed reply; the privacy notice on the first request and monthly;
+/// step: off → a fixed reply; the decisions on their proposals since the last request; over a limit → a fixed
+/// reply; the privacy notice on the first request and monthly;
 /// then the player agent runs in the player pool and its answer is whispered or posted.
 /// </summary>
 public sealed class PlayerRequestHandler(
     SettingsStore settings,
     PlayerUsageStore usage,
+    PlayerOutbox outbox,
     ConversationStore conversations,
     AssistantRunner runner,
     HandoverService handovers,
@@ -34,6 +36,9 @@ public sealed class PlayerRequestHandler(
             await request.ReplyAsync(NotEnabled, token);
             return;
         }
+        // Decisions on the player's proposals since their last request, before anything else.
+        foreach (var note in outbox.Take(request.ConversationKey))
+            await request.ReplyAsync(note, token);
         if (usage.TryRequest(request.ConversationKey, player.Limits) is { } limit)
         {
             await request.ReplyAsync(limit, token);

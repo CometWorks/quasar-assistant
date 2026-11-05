@@ -44,6 +44,7 @@ public static class AssistantServiceCollectionExtensions
         services.AddSingleton<ProposalStore>();
         services.AddSingleton<HandoverStore>();
         services.AddSingleton<PlayerUsageStore>();
+        services.AddSingleton<PlayerOutbox>();
         services.AddSingleton<MetricsLog>();
         services.AddSingleton<SkillLibrary>();
         services.AddSingleton<McpRegistry>();
@@ -131,12 +132,13 @@ public static class AssistantServiceCollectionExtensions
 }
 
 /// <summary>On start: fetches the MCP servers' tools. Hourly: deletes old conversations and expires old proposals
-/// and hand-overs.</summary>
+/// and hand-overs, and drops undelivered player notes as old.</summary>
 internal sealed class AssistantMaintenance(
     SettingsStore settings,
     ConversationStore conversations,
     ProposalService proposals,
     HandoverStore handovers,
+    PlayerOutbox outbox,
     McpRegistry mcp,
     TimeProvider time,
     ILogger<AssistantMaintenance> logger
@@ -154,6 +156,7 @@ internal sealed class AssistantMaintenance(
                 await proposals.ExpireAsync(token);
                 var expired = time.GetUtcNow().AddDays(-settings.Current.ProposalExpiryDays);
                 handovers.Forget(expired);
+                outbox.Forget(expired);
             }
             catch (Exception error) when (error is not OperationCanceledException)
             {

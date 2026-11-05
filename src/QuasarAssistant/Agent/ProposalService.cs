@@ -17,6 +17,7 @@ public sealed class ProposalService(
     ConversationStore conversations,
     SettingsStore settings,
     AdminNotifier notifier,
+    PlayerOutbox outbox,
     IEnumerable<QuasarOperation> operations,
     TimeProvider time
 )
@@ -216,6 +217,13 @@ public sealed class ProposalService(
                     Outcome = outcome,
                 }
         );
+        // A player hears it on their next request; nothing reaches them before.
+        if (decided?.Role == AssistantRoles.Player)
+            outbox.Add(
+                ConversationStore.PlayerKey(decided.AskerSubject),
+                PlayerNote(decided),
+                time.GetUtcNow()
+            );
         if (
             decided is not null
             && conversations.Get(decided.AskerSubject, decided.ConversationId) is { } conversation
@@ -232,4 +240,28 @@ public sealed class ProposalService(
     }
 
     private static string Name(ClaimsPrincipal user) => user.Identity?.Name ?? "an admin";
+
+    /// <summary>The decision in the player's words, without operation keys or proposal IDs.</summary>
+    internal static string PlayerNote(Proposal proposal)
+    {
+        var what =
+            proposal.Operation == ToolCatalog.RestoreKey
+                ? "restore of "
+                    + (
+                        proposal.Details?.FirstOrDefault(line => line.StartsWith("Grid: "))?[6..]
+                        ?? "a grid"
+                    )
+            : proposal.OperationId.StartsWith("mcp.", StringComparison.Ordinal) ? "an MCP tool call"
+            : proposal.Operation;
+        return proposal.Status switch
+        {
+            ProposalStatus.Approved =>
+                $"An admin approved your request ({what}) and it was carried out.",
+            ProposalStatus.Failed =>
+                $"An admin approved your request ({what}), but it failed: {ResultFilter.Cap(proposal.Outcome ?? "", 300)}",
+            ProposalStatus.Rejected =>
+                $"An admin turned down your request ({what}): {proposal.Outcome}",
+            _ => $"Your request ({what}) expired without an admin's decision.",
+        };
+    }
 }

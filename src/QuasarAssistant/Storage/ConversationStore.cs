@@ -45,6 +45,12 @@ public sealed class ConversationStore(AssistantPaths paths, TimeProvider time)
     /// <summary>Owner prefix of player conversations, so they never mix with a person's own.</summary>
     public const string PlayerPrefix = "player:";
 
+    /// <summary>The player's key (<c>steam:&lt;id&gt;</c> or <c>discord:&lt;id&gt;</c>) of a conversation owner.</summary>
+    public static string PlayerKey(string ownerSubject) =>
+        ownerSubject.StartsWith(PlayerPrefix, StringComparison.Ordinal)
+            ? ownerSubject[PlayerPrefix.Length..]
+            : ownerSubject;
+
     /// <summary>A gap after which a keyed conversation starts over, so it doesn't grow without end.</summary>
     public static readonly TimeSpan SessionGap = TimeSpan.FromHours(2);
 

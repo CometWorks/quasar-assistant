@@ -22,12 +22,7 @@ public sealed class HandoverService(HandoverStore store, AdminNotifier notifier,
             Id = Guid.NewGuid().ToString("N")[..12],
             Created = time.GetUtcNow(),
             ConversationId = conversation.Id,
-            PlayerKey = conversation.OwnerSubject.StartsWith(
-                ConversationStore.PlayerPrefix,
-                StringComparison.Ordinal
-            )
-                ? conversation.OwnerSubject[ConversationStore.PlayerPrefix.Length..]
-                : conversation.OwnerSubject,
+            PlayerKey = ConversationStore.PlayerKey(conversation.OwnerSubject),
             PlayerName = conversation.OwnerName,
             Source = source ?? "",
             Reason = Shorten(reason.Trim(), 1000),

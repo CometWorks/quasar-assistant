@@ -83,9 +83,7 @@ public sealed class DiscordAdminHandler(
             && conversation.Messages.Skip(before).Any(m => m.ProposalId is not null)
         )
             text += $"\nApprovals: {notifier.ApprovalsUrl}";
-        await request.ReplyAsync(Quiet(text.Length == 0 ? "(No answer.)" : text), token);
+        // Core sends the reply without resolving mentions.
+        await request.ReplyAsync(text.Length == 0 ? "(No answer.)" : text, token);
     }
-
-    /// <summary>Breaks mentions so a model-written <c>@everyone</c> or user mention pings nobody.</summary>
-    public static string Quiet(string text) => text.Replace("@", "@​").Replace("<#", "<​#");
 }

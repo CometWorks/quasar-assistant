@@ -93,7 +93,8 @@ public sealed class DiscordAdminTests
         Assert.Equal(["quasar.core/servers.status"], harness.Dispatched.Keys);
         Assert.Equal("quasar.core/servers.start", Assert.Single(harness.Audit.Proposals).Key);
         var reply = Assert.Single(replies);
-        Assert.DoesNotContain("@everyone", reply, StringComparison.Ordinal);
+        // Core sends it without resolving mentions, so the text goes as the model wrote it.
+        Assert.StartsWith("Proposed a start, @everyone.", reply, StringComparison.Ordinal);
         Assert.Contains("https://q.example/assistant/approvals", reply);
         // The proposal is announced in the admin channel too.
         Assert.Contains(harness.Discord.Posts, post => post.Text.Contains("servers.start"));
