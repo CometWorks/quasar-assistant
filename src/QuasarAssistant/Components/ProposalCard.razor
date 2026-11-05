@@ -1,0 +1,79 @@
+@inject ProposalService Service
+@inject IAuthorizationService Authorization
+
+<article class="assistant-proposal assistant-proposal-@Proposal.Status.ToString().ToLowerInvariant()" aria-label="Proposal @Proposal.Id">
+    <header>
+        <strong>Proposal: <code>@Proposal.Operation</code></strong>
+        <span class="assistant-proposal-status">@StatusText</span>
+    </header>
+    @if (ShowAsker)
+    {
+        <p>Asked by @Proposal.AskerName, @Proposal.Created.ToUniversalTime().ToString("yyyy-MM-dd HH:mm") UTC</p>
+    }
+    @if (!string.IsNullOrWhiteSpace(Proposal.Reason))
+    {
+        <p class="assistant-proposal-reason">@Proposal.Reason</p>
+    }
+    <pre>@Proposal.Arguments</pre>
+    @if (Proposal.Outcome is { } outcome && Proposal.Status != ProposalStatus.Pending)
+    {
+        <p class="assistant-proposal-outcome">@outcome</p>
+    }
+    @if (Proposal.Status == ProposalStatus.Pending && _canApprove)
+    {
+        <div class="assistant-row">
+            <button type="button" class="assistant-button assistant-button-primary" disabled="@_busy" @onclick="ApproveAsync">Approve</button>
+            <input type="text" @bind="_reason" placeholder="Reason (optional)" aria-label="Reason for rejecting" maxlength="500" />
+            <button type="button" class="assistant-button" disabled="@_busy" @onclick="RejectAsync">Reject</button>
+        </div>
+    }
+    @if (_error is not null)
+    {
+        <p class="assistant-error" role="alert">@_error</p>
+    }
+</article>
+
+@code {
+    [CascadingParameter] private Task<AuthenticationState> Authentication { get; set; } = null!;
+    [Parameter, EditorRequired] public Proposal Proposal { get; set; } = null!;
+    [Parameter] public bool ShowAsker { get; set; }
+
+    private ClaimsPrincipal _user = new();
+    private bool _canApprove;
+    private bool _busy;
+    private string? _reason;
+    private string? _error;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _user = (await Authentication).User;
+        _canApprove = await Service.CanApproveAsync(_user, Authorization, Proposal);
+    }
+
+    private string StatusText => Proposal.Status switch
+    {
+        ProposalStatus.Pending => "Waiting for approval",
+        ProposalStatus.Approved => $"Approved by {Proposal.DecidedBy}",
+        ProposalStatus.Failed => $"Approved by {Proposal.DecidedBy}, failed",
+        ProposalStatus.Rejected => $"Rejected by {Proposal.DecidedBy}",
+        _ => "Expired",
+    };
+
+    private Task ApproveAsync() => DecideAsync(token => Service.ApproveAsync(_user, Proposal.Id, token));
+
+    private Task RejectAsync() => DecideAsync(token => Service.RejectAsync(_user, Proposal.Id, _reason, token));
+
+    private async Task DecideAsync(Func<CancellationToken, Task<string?>> decide)
+    {
+        _busy = true;
+        _error = null;
+        try
+        {
+            _error = await decide(CancellationToken.None);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

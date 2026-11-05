@@ -1,0 +1,37 @@
+@* The chat drawer on every page (QuasarExtensionTargets.LayoutDrawer, policy CanUseAssistant). *@
+
+@if (_open)
+{
+    <aside class="assistant-drawer" aria-label="Assistant">
+        <header class="assistant-drawer-header">
+            <h2>Assistant</h2>
+            <button type="button" class="assistant-icon-button" title="New conversation" aria-label="New conversation" @onclick="New">
+                <AssistantIcon Icon="@AssistantIcons.Add" />
+            </button>
+            <a class="assistant-icon-button" href="@(_conversationId is null ? "assistant" : "assistant/" + _conversationId)" title="Open on the Assistant page" aria-label="Open on the Assistant page">
+                <AssistantIcon Icon="@AssistantIcons.OpenInNew" />
+            </a>
+            <button type="button" class="assistant-icon-button" title="Close" aria-label="Close the assistant" @onclick="() => _open = false">
+                <AssistantIcon Icon="@AssistantIcons.Close" />
+            </button>
+        </header>
+        <ChatView @key="_conversationId" ConversationId="@_conversationId" Page="@(new PageContext(PageUri, ServerName))" Compact="true"
+                  ConversationStarted="id => _conversationId = id" />
+    </aside>
+}
+else
+{
+    <button type="button" class="assistant-launcher" title="Assistant" aria-label="Open the assistant" @onclick="() => _open = true">
+        <AssistantIcon Icon="@AssistantIcons.Assistant" />
+    </button>
+}
+
+@code {
+    [Parameter] public string PageUri { get; set; } = "";
+    [Parameter] public string? ServerName { get; set; }
+
+    private bool _open;
+    private string? _conversationId;
+
+    private void New() => _conversationId = null;
+}
