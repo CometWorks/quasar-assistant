@@ -9,6 +9,28 @@ using QuasarAssistant.Storage;
 
 namespace QuasarAssistant.Agent;
 
+/// <summary>What to answer and as whom.</summary>
+/// <param name="HostLines">The <c>[host]</c> context lines of the user turn.</param>
+public sealed record AskRequest(string Text, IReadOnlyList<string> HostLines)
+{
+    /// <summary>The person the admin assistant acts for.</summary>
+    public ClaimsPrincipal? Asker { get; init; }
+
+    /// <summary>The player agent core built; null for a Discord user without a link.</summary>
+    public ClaimsPrincipal? Agent { get; init; }
+
+    /// <summary>Every change becomes a proposal, whatever the mode (Discord admin requests).</summary>
+    public bool ProposeOnly { get; init; }
+
+    public Func<bool>? TryUseAction { get; init; }
+    public string? Source { get; init; }
+}
+
+/// <param name="Outcome"><c>ok</c>, <c>busy</c>, <c>deadline</c>, <c>turn-limit</c>, <c>backends-failed</c>,
+/// <c>rejected</c>, <c>stopped</c> or <c>error</c>, as in the metrics.</param>
+/// <param name="Text">The final answer, or what stopped the run.</param>
+public sealed record RunResult(string Outcome, string Text);
+
 /// <summary>
 /// Runs the agent loop: the prompt prefix, the conversation and the new user turn go to the role's backends; the
 /// tool calls in the answer run one after another and their results go back, until the model answers without a
@@ -44,7 +66,8 @@ public sealed class AssistantRunner(
             run.Stop.Cancel();
     }
 
-    /// <summary>Adds the asker's message and answers it. Returns false when the conversation already runs.</summary>
+    /// <summary>Adds a person's message from the web chat and answers it. Returns false when the conversation
+    /// already runs.</summary>
     public async Task<bool> AskAsync(
         Conversation conversation,
         ClaimsPrincipal asker,
@@ -52,28 +75,41 @@ public sealed class AssistantRunner(
         PageContext page
     )
     {
+        var subject = asker.FindFirstValue(ClaimTypes.NameIdentifier) ?? conversation.OwnerSubject;
+        var request = new AskRequest(
+            text,
+            Prompt.HostLines(time.GetUtcNow(), asker.Identity?.Name ?? subject, subject, page)
+        )
+        {
+            Asker = asker,
+        };
+        return await AskAsync(conversation, request, CancellationToken.None) is not null;
+    }
+
+    /// <summary>Adds the message and answers it in the conversation's role. Null when the conversation already
+    /// runs.</summary>
+    public async Task<RunResult?> AskAsync(
+        Conversation conversation,
+        AskRequest request,
+        CancellationToken token
+    )
+    {
         var run = new Run();
         if (!_running.TryAdd(conversation.Id, run))
-            return false;
+            return null;
+        var cancel = token.Register(run.Stop.Cancel);
         try
         {
-            var subject =
-                asker.FindFirstValue(ClaimTypes.NameIdentifier) ?? conversation.OwnerSubject;
             conversations.Append(
                 conversation,
                 new ChatMessage
                 {
                     Role = ChatRole.User,
-                    Text = text,
-                    HostLines = Prompt.HostLines(
-                        time.GetUtcNow(),
-                        asker.Identity?.Name ?? subject,
-                        subject,
-                        page
-                    ),
+                    Text = request.Text,
+                    HostLines = request.HostLines,
                 }
             );
-            await RunAsync(conversation, asker, text, run);
+            return await RunAsync(conversation, request, run);
         }
         catch (Exception error)
         {
@@ -82,23 +118,20 @@ public sealed class AssistantRunner(
                 "Assistant run failed for conversation {Conversation}",
                 conversation.Id
             );
-            conversations.Append(conversation, Error("The run failed: " + error.Message));
+            var text = "The run failed: " + error.Message;
+            conversations.Append(conversation, Error(text));
+            return new RunResult("error", text);
         }
         finally
         {
             _running.TryRemove(conversation.Id, out _);
+            cancel.Dispose();
             run.Stop.Dispose();
             conversations.Touch(conversation.Id);
         }
-        return true;
     }
 
-    private async Task RunAsync(
-        Conversation conversation,
-        ClaimsPrincipal asker,
-        string text,
-        Run run
-    )
+    private async Task<RunResult> RunAsync(Conversation conversation, AskRequest ask, Run run)
     {
         var current = settings.Current;
         var role = current.Role(conversation.Role);
@@ -112,6 +145,7 @@ public sealed class AssistantRunner(
         var turns = 0;
         var queueSeconds = 0.0;
         string outcome;
+        string reply = "";
 
         var pool = Pool(conversation.Role, role.MaxConcurrentRuns);
         run.Status = "Waiting for a free slot";
@@ -127,16 +161,13 @@ public sealed class AssistantRunner(
         catch (OperationCanceledException)
         {
             conversations.Append(conversation, Error("Stopped."));
-            return;
+            return new RunResult("stopped", "Stopped.");
         }
         if (!entered)
         {
-            conversations.Append(
-                conversation,
-                Error(
-                    $"The assistant is busy: your request waited {role.QueueWaitSeconds} s for a free slot and was canceled. Try again later."
-                )
-            );
+            reply =
+                $"The assistant is busy: your request waited {role.QueueWaitSeconds} s for a free slot and was canceled. Try again later.";
+            conversations.Append(conversation, Error(reply));
             metrics.Append(
                 record with
                 {
@@ -145,7 +176,7 @@ public sealed class AssistantRunner(
                     Seconds = clock.Elapsed.TotalSeconds,
                 }
             );
-            return;
+            return new RunResult("busy", reply);
         }
         queueSeconds = clock.Elapsed.TotalSeconds;
         using var deadline = new CancellationTokenSource(
@@ -158,8 +189,9 @@ public sealed class AssistantRunner(
         );
         try
         {
-            var toolSet = await catalog.ForAsync(role);
-            var system = Prompt.System(role);
+            var canAct = conversation.Role != AssistantRoles.Player || ask.Agent is not null;
+            var toolSet = await catalog.ForAsync(role, conversation.Role, canAct);
+            var system = Prompt.System(conversation.Role, role);
             outcome = "turn-limit";
             while (turns < role.MaxTurns)
             {
@@ -183,12 +215,13 @@ public sealed class AssistantRunner(
                 answeredBy.Add(routed.Backend);
                 var answer = routed.Response;
                 usage = usage.Add(answer.Usage);
+                var text = AnswerText(answer);
                 conversations.Append(
                     conversation,
                     new ChatMessage
                     {
                         Role = ChatRole.Assistant,
-                        Text = AnswerText(answer),
+                        Text = text,
                         ToolCalls = answer.ToolCalls,
                         Thinking = answer.Thinking.Count > 0 ? answer.Thinking : null,
                     }
@@ -196,15 +229,22 @@ public sealed class AssistantRunner(
                 if (answer.ToolCalls.Count == 0)
                 {
                     outcome = "ok";
+                    reply = text;
                     break;
                 }
                 var context = new ToolCallContext(
-                    asker,
                     conversation,
-                    text,
+                    ask.Text,
                     Reason(answer.Text),
                     current.ResultCapBytes
-                );
+                )
+                {
+                    Asker = ask.Asker,
+                    Agent = ask.Agent,
+                    ProposeOnly = ask.ProposeOnly,
+                    TryUseAction = ask.TryUseAction,
+                    Source = ask.Source,
+                };
                 foreach (var call in answer.ToolCalls)
                 {
                     run.Status = "Running " + call.Name;
@@ -217,41 +257,37 @@ public sealed class AssistantRunner(
                 }
             }
             if (outcome == "turn-limit")
-                conversations.Append(
-                    conversation,
-                    Error(
-                        $"Stopped after {role.MaxTurns} model turns without a final answer. Ask again to go on."
-                    )
-                );
+            {
+                reply =
+                    $"Stopped after {role.MaxTurns} model turns without a final answer. Ask again to go on.";
+                conversations.Append(conversation, Error(reply));
+            }
         }
         catch (OperationCanceledException) when (deadline.IsCancellationRequested)
         {
             outcome = "deadline";
-            conversations.Append(
-                conversation,
-                Error(
-                    $"Stopped: the run passed its {role.RunDeadlineSeconds} s deadline. Ask again to go on."
-                )
-            );
+            reply =
+                $"Stopped: the run passed its {role.RunDeadlineSeconds} s deadline. Ask again to go on.";
+            conversations.Append(conversation, Error(reply));
         }
         catch (OperationCanceledException) when (run.Stop.IsCancellationRequested)
         {
             outcome = "stopped";
-            conversations.Append(conversation, Error("Stopped."));
+            reply = "Stopped.";
+            conversations.Append(conversation, Error(reply));
         }
         catch (AllBackendsFailed failure)
         {
             outcome = "backends-failed";
             attempts.AddRange(failure.Attempts);
-            conversations.Append(conversation, Error(Describe(failure, backends.Count)));
+            reply = Describe(failure, backends.Count);
+            conversations.Append(conversation, Error(reply));
         }
         catch (BackendRejected rejected)
         {
             outcome = "rejected";
-            conversations.Append(
-                conversation,
-                Error("The backend rejected the request: " + rejected.Message)
-            );
+            reply = "The backend rejected the request: " + rejected.Message;
+            conversations.Append(conversation, Error(reply));
         }
         finally
         {
@@ -275,6 +311,7 @@ public sealed class AssistantRunner(
                 Seconds = clock.Elapsed.TotalSeconds,
             }
         );
+        return new RunResult(outcome, reply);
     }
 
     private SemaphoreSlim Pool(string role, int size)

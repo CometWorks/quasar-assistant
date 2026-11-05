@@ -12,12 +12,19 @@ public sealed record PageContext(string? PageUri, string? ServerName);
 /// </summary>
 public static class Prompt
 {
-    private static readonly string Base = ReadBase();
+    private static readonly string AdminBase = ReadBase("QuasarAssistant.system-prompt.md");
+    private static readonly string PlayerBase = ReadBase("QuasarAssistant.player-system-prompt.md");
 
-    public static string System(RoleSettings role) =>
-        string.IsNullOrWhiteSpace(role.RoleText)
-            ? Base
-            : Base + "\n# Notes from the admins\n\n" + role.RoleText.Trim() + "\n";
+    public static string System(string roleName, RoleSettings role)
+    {
+        var text = roleName == AssistantRoles.Player ? PlayerBase : AdminBase;
+        return string.IsNullOrWhiteSpace(role.RoleText)
+            ? text
+            : text + "\n# Notes from the admins\n\n" + role.RoleText.Trim() + "\n";
+    }
+
+    public static string Time(DateTimeOffset now) =>
+        "time: " + now.UtcDateTime.ToString("yyyy-MM-dd HH:mm 'UTC'", CultureInfo.InvariantCulture);
 
     public static IReadOnlyList<string> HostLines(
         DateTimeOffset now,
@@ -26,12 +33,7 @@ public static class Prompt
         PageContext page
     )
     {
-        List<string> lines =
-        [
-            "time: "
-                + now.UtcDateTime.ToString("yyyy-MM-dd HH:mm 'UTC'", CultureInfo.InvariantCulture),
-            $"asker: {askerName} ({askerSubject})",
-        ];
+        List<string> lines = [Time(now), $"asker: {askerName} ({askerSubject})"];
         if (!string.IsNullOrWhiteSpace(page.PageUri))
             lines.Add("page: " + page.PageUri);
         if (!string.IsNullOrWhiteSpace(page.ServerName))
@@ -39,11 +41,9 @@ public static class Prompt
         return lines;
     }
 
-    private static string ReadBase()
+    private static string ReadBase(string name)
     {
-        using var stream = typeof(Prompt).Assembly.GetManifestResourceStream(
-            "QuasarAssistant.system-prompt.md"
-        )!;
+        using var stream = typeof(Prompt).Assembly.GetManifestResourceStream(name)!;
         using var reader = new StreamReader(stream);
         return reader.ReadToEnd().ReplaceLineEndings("\n");
     }

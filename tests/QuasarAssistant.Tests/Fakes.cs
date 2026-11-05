@@ -1,13 +1,16 @@
 using System.Collections.Concurrent;
+using System.Reflection;
 using System.Security.Claims;
 using System.Text.Json;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Quasar.Plugin.Abstractions.Assistant;
 using Quasar.Plugin.Abstractions.Operations;
 using Quasar.Plugin.Abstractions.Security;
 using QuasarAssistant.Agent;
 using QuasarAssistant.Llm;
+using QuasarAssistant.Players;
 using QuasarAssistant.Settings;
 using QuasarAssistant.Storage;
 
@@ -95,30 +98,43 @@ public sealed class FakeDispatcher(IEnumerable<QuasarOperation> operations, Disp
             || operationId.StartsWith("security.", StringComparison.Ordinal)
         )
             return new(403, Error: "Assistants cannot use this operation.");
+        // As core: only the player agent satisfies CanActAsPlayer, and it holds no role for anything else.
+        var isPlayer =
+            context.User.IsQuasarAgent(out var agent) && agent.Kind == QuasarAgentKind.Player;
+        if (ToolCatalog.IsPlayerOperation(operation) != isPlayer)
+            return new(403, Error: "The caller cannot access this SDK operation.");
         if (log.Refuse.TryGetValue(key, out var reason))
             return new(403, Error: reason);
-        return new(200, await operation.InvokeAsync(context, request, cancellationToken));
+        try
+        {
+            return new(200, await operation.InvokeAsync(context, request, cancellationToken));
+        }
+        catch (QuasarOperationException error)
+        {
+            return new(error.StatusCode, Error: error.Message);
+        }
     }
 }
 
+/// <summary>Builds a real assistant identity, as core would, with the asker's name as a claim for the tests.</summary>
 public sealed class FakePrincipals : IQuasarAgentPrincipals
 {
     public Task<ClaimsPrincipal> CreateAssistantAsync(
         ClaimsPrincipal asker,
         string conversationId,
         string request
-    ) =>
-        Task.FromResult(
-            new ClaimsPrincipal(
-                new ClaimsIdentity(
-                    [
-                        new Claim(ClaimTypes.NameIdentifier, "agent:assistant"),
-                        new Claim("asker", asker.Identity!.Name!),
-                    ],
-                    "fake"
-                )
-            )
+    )
+    {
+        var identity = PlayerAsk.Identity(
+            QuasarAgentKind.Assistant,
+            asker,
+            null,
+            null,
+            conversationId
         );
+        identity.AddClaim(new Claim("asker", asker.Identity!.Name!));
+        return Task.FromResult(new ClaimsPrincipal(identity));
+    }
 }
 
 public sealed class FakeAuditLog : IQuasarAuditLog
@@ -173,10 +189,141 @@ public sealed class FakeAuditLog : IQuasarAuditLog
         return Task.FromResult(new QuasarOperationResult(200));
     }
 
+    /// <summary>The log core would query, newest last.</summary>
+    public List<QuasarAuditEntry> Entries { get; } = [];
+
     public Task<IReadOnlyList<QuasarAuditEntry>> QueryAsync(
         QuasarAuditFilter filter,
         CancellationToken token
-    ) => Task.FromResult<IReadOnlyList<QuasarAuditEntry>>([]);
+    ) =>
+        Task.FromResult<IReadOnlyList<QuasarAuditEntry>>(
+            Entries
+                .Where(entry =>
+                    (filter.From is null || entry.Time >= filter.From)
+                    && (filter.Result is null || entry.Result == filter.Result)
+                    && (
+                        filter.Operation is null
+                        || entry.Operation.Contains(
+                            filter.Operation,
+                            StringComparison.OrdinalIgnoreCase
+                        )
+                    )
+                )
+                .Reverse()
+                .Take(filter.Take)
+                .ToList()
+        );
+
+    /// <summary>A restore the player got, as core logs it.</summary>
+    public QuasarAuditEntry AddRestore(
+        string steamId,
+        DateTimeOffset time,
+        QuasarAuditMode mode = QuasarAuditMode.Applied
+    )
+    {
+        var entry = new QuasarAuditEntry
+        {
+            Id = "restore" + Interlocked.Increment(ref _next),
+            Time = time,
+            Principal = new(QuasarAuditPrincipalKind.PlayerAgent, "agent:player", "Player agent"),
+            Requester = new(SteamId: steamId),
+            Operation = ToolCatalog.RestoreKey,
+            Area = "my",
+            Mode = mode,
+            Result = QuasarAuditResult.Ok,
+        };
+        Entries.Add(entry);
+        return entry;
+    }
+
+    /// <summary>An admin's undo of an entry.</summary>
+    public void AddUndo(QuasarAuditEntry entry, DateTimeOffset time) =>
+        Entries.Add(
+            entry with
+            {
+                Id = "undo" + Interlocked.Increment(ref _next),
+                Time = time,
+                Principal = new(QuasarAuditPrincipalKind.Person, "steam:9", "Admin"),
+                Requester = new(Subject: "steam:9"),
+                Reverses = entry.Id,
+            }
+        );
+}
+
+/// <summary>Core's Discord channels: records the posts.</summary>
+public sealed class FakeDiscord : IQuasarDiscordChannels
+{
+    public ConcurrentQueue<(string Channel, string Text)> Posts { get; } = new();
+
+    public Task<bool> PostAsync(string channelId, string text, CancellationToken token)
+    {
+        Posts.Enqueue((channelId, text));
+        return Task.FromResult(true);
+    }
+}
+
+/// <summary>A player request as core makes it, with the replies it got.</summary>
+public sealed class PlayerAsk
+{
+    public List<string> Replies { get; } = [];
+
+    public static ClaimsPrincipal Agent(
+        string steamId = "76561198000000001",
+        string name = "Pilot"
+    ) => new(Identity(QuasarAgentKind.Player, null, steamId, name, "steam:" + steamId));
+
+    /// <summary>Only core builds agent identities; the tests reach its internal constructor.</summary>
+    public static QuasarAgentIdentity Identity(
+        QuasarAgentKind kind,
+        ClaimsPrincipal? asker,
+        string? steamId,
+        string? name,
+        string conversationId
+    ) =>
+        (QuasarAgentIdentity)
+            Activator.CreateInstance(
+                typeof(QuasarAgentIdentity),
+                BindingFlags.NonPublic | BindingFlags.Instance,
+                null,
+                [
+                    kind,
+                    asker,
+                    steamId,
+                    name,
+                    null,
+                    conversationId,
+                    "!ask",
+                    kind == QuasarAgentKind.Assistant ? new[] { "editor" } : Array.Empty<string>(),
+                    kind == QuasarAgentKind.Player ? "alpha" : null,
+                ],
+                null
+            )!;
+
+    public QuasarPlayerRequest Game(string text, string steamId = "76561198000000001") =>
+        new(
+            Agent(steamId),
+            "steam:" + steamId,
+            text,
+            new QuasarPlayerRequestSource(QuasarRequestChannel.Game, "alpha"),
+            Reply
+        );
+
+    /// <summary>A Discord user without a link: no player principal.</summary>
+    public QuasarPlayerRequest Unlinked(string text, string discordId = "555") =>
+        new(
+            null,
+            "discord:" + discordId,
+            text,
+            new QuasarPlayerRequestSource(QuasarRequestChannel.Discord, DiscordUserId: discordId),
+            Reply
+        );
+
+    private Task Reply(string text, CancellationToken token)
+    {
+        lock (Replies)
+            Replies.Add(text);
+        return Task.CompletedTask;
+    }
 }
 
 public sealed class ManualTime : TimeProvider
@@ -197,6 +344,9 @@ public sealed class Harness : IAsyncDisposable
     public SettingsStore Settings => Services.GetRequiredService<SettingsStore>();
     public AssistantRunner Runner => Services.GetRequiredService<AssistantRunner>();
     public ConversationStore Conversations => Services.GetRequiredService<ConversationStore>();
+    public FakeDiscord Discord => Services.GetRequiredService<FakeDiscord>();
+    public PlayerRequestHandler Players =>
+        (PlayerRequestHandler)Services.GetRequiredService<IQuasarPlayerRequestHandler>();
 
     public static async Task<Harness> StartAsync(
         IEnumerable<QuasarOperation> operations,
@@ -220,6 +370,10 @@ public sealed class Harness : IAsyncDisposable
         services.AddScoped<IQuasarOperationDispatcher, FakeDispatcher>();
         services.AddSingleton<IQuasarAgentPrincipals, FakePrincipals>();
         services.AddSingleton<IQuasarAuditLog, FakeAuditLog>();
+        services.AddSingleton<FakeDiscord>();
+        services.AddSingleton<IQuasarDiscordChannels>(provider =>
+            provider.GetRequiredService<FakeDiscord>()
+        );
         services.AddScoped<IQuasarAgentOperations, FakeAgentOperations>();
         services.AddAuthorizationCore(options =>
         {
@@ -229,6 +383,10 @@ public sealed class Harness : IAsyncDisposable
             );
             options.AddPolicy(
                 QuasarPolicyNames.CanControlServers,
+                p => p.RequireRole("editor", "admin")
+            );
+            options.AddPolicy(
+                QuasarPolicyNames.CanUseAssistant,
                 p => p.RequireRole("editor", "admin")
             );
             options.AddPolicy(
@@ -248,16 +406,15 @@ public sealed class Harness : IAsyncDisposable
     /// <summary>Sets up backends of one kind on the stub server, in this order for the admin role.</summary>
     public void UseBackends(BackendKind kind, params string[] names) =>
         Configure(settings =>
-            settings with
+            settings.WithRole(
+                AssistantRoles.Admin,
+                settings.Role(AssistantRoles.Admin) with
+                {
+                    Backends = [.. names],
+                }
+            ) with
             {
                 Backends = names.Select(name => Backend(name, kind)).ToList(),
-                Roles = new()
-                {
-                    [AssistantRoles.Admin] = settings.Role(AssistantRoles.Admin) with
-                    {
-                        Backends = [.. names],
-                    },
-                },
             }
         );
 
@@ -275,15 +432,34 @@ public sealed class Harness : IAsyncDisposable
     public void Configure(Func<AssistantSettings, AssistantSettings> change) =>
         Settings.Save(change(Settings.Current));
 
+    /// <summary>Turns the player agent on with backends of one kind on the stub server.</summary>
+    public void UsePlayerBackends(BackendKind kind, params string[] names) =>
+        Configure(settings =>
+            settings.WithRole(
+                AssistantRoles.Player,
+                settings.Role(AssistantRoles.Player) with
+                {
+                    Backends = [.. names],
+                }
+            ) with
+            {
+                Backends =
+                [
+                    .. settings.Backends.Where(b => !names.Contains(b.Name)),
+                    .. names.Select(name => Backend(name, kind)),
+                ],
+                Player = settings.Player with { Enabled = true },
+            }
+        );
+
+    public void ConfigurePlayer(Func<RoleSettings, RoleSettings> change) =>
+        Configure(settings =>
+            settings.WithRole(AssistantRoles.Player, change(settings.Role(AssistantRoles.Player)))
+        );
+
     public void ConfigureRole(Func<RoleSettings, RoleSettings> change) =>
         Configure(settings =>
-            settings with
-            {
-                Roles = new()
-                {
-                    [AssistantRoles.Admin] = change(settings.Role(AssistantRoles.Admin)),
-                },
-            }
+            settings.WithRole(AssistantRoles.Admin, change(settings.Role(AssistantRoles.Admin)))
         );
 
     public static ClaimsPrincipal Person(

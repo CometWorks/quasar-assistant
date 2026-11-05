@@ -15,5 +15,13 @@
       Include="Agent\system-prompt.md"
       LogicalName="QuasarAssistant.system-prompt.md"
     />
+    <EmbeddedResource
+      Include="Agent\player-system-prompt.md"
+      LogicalName="QuasarAssistant.player-system-prompt.md"
+    />
+    <EmbeddedResource
+      Include="QuasarBook\*.md;QuasarBook\COMMIT"
+      LogicalName="QuasarAssistant.QuasarBook.%(Filename)%(Extension)"
+    />
   </ItemGroup>
 </Project>

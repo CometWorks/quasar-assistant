@@ -42,6 +42,12 @@ public sealed record ConversationSummary(string Id, string Title, DateTimeOffset
 /// <summary>Conversations as JSON files, one folder per asker, deleted some days after their last message.</summary>
 public sealed class ConversationStore(AssistantPaths paths, TimeProvider time)
 {
+    /// <summary>Owner prefix of player conversations, so they never mix with a person's own.</summary>
+    public const string PlayerPrefix = "player:";
+
+    /// <summary>A gap after which a keyed conversation starts over, so it doesn't grow without end.</summary>
+    public static readonly TimeSpan SessionGap = TimeSpan.FromHours(2);
+
     private readonly string _root = Path.Combine(paths.DataDirectory, "conversations");
     private readonly ConcurrentDictionary<string, Conversation> _loaded = new();
 
@@ -51,13 +57,14 @@ public sealed class ConversationStore(AssistantPaths paths, TimeProvider time)
     public Conversation Create(
         string ownerSubject,
         string ownerName,
-        string role = AssistantRoles.Admin
+        string role = AssistantRoles.Admin,
+        string? id = null
     )
     {
         var now = time.GetUtcNow();
         var conversation = new Conversation
         {
-            Id = Guid.NewGuid().ToString("N"),
+            Id = id ?? Guid.NewGuid().ToString("N"),
             OwnerSubject = ownerSubject,
             OwnerName = ownerName,
             Role = role,
@@ -66,6 +73,24 @@ public sealed class ConversationStore(AssistantPaths paths, TimeProvider time)
         };
         _loaded[conversation.Id] = conversation;
         return conversation;
+    }
+
+    /// <summary>
+    /// The one conversation per key, such as a player's Steam ID or a Discord admin's subject, so it follows the
+    /// player across cluster nodes. After <see cref="SessionGap"/> without a message it starts over.
+    /// </summary>
+    public Conversation Keyed(string ownerSubject, string ownerName, string role, string key)
+    {
+        var id = new Guid(
+            SHA256.HashData(Encoding.UTF8.GetBytes(role + "\n" + key))[..16]
+        ).ToString("N");
+        if (Get(ownerSubject, id) is { } existing)
+        {
+            if (existing.Updated > time.GetUtcNow() - SessionGap)
+                return existing;
+            Delete(existing);
+        }
+        return Create(ownerSubject, ownerName, role, id);
     }
 
     /// <summary>Null unless the conversation exists and belongs to the subject.</summary>
@@ -118,7 +143,9 @@ public sealed class ConversationStore(AssistantPaths paths, TimeProvider time)
     public void Delete(Conversation conversation)
     {
         _loaded.TryRemove(conversation.Id, out _);
-        File.Delete(FilePath(conversation.OwnerSubject, conversation.Id));
+        var path = FilePath(conversation.OwnerSubject, conversation.Id);
+        if (File.Exists(path))
+            File.Delete(path);
         Changed?.Invoke(conversation.Id);
     }
 

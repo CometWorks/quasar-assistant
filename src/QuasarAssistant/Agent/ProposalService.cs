@@ -16,6 +16,7 @@ public sealed class ProposalService(
     ProposalStore proposals,
     ConversationStore conversations,
     SettingsStore settings,
+    AdminNotifier notifier,
     IEnumerable<QuasarOperation> operations,
     TimeProvider time
 )
@@ -30,7 +31,8 @@ public sealed class ProposalService(
         JsonElement arguments,
         Conversation conversation,
         string? reason,
-        CancellationToken token
+        CancellationToken token,
+        IReadOnlyList<string>? details = null
     )
     {
         var entry = await audit.RecordProposalAsync(
@@ -47,13 +49,23 @@ public sealed class ProposalService(
             ConversationId = conversation.Id,
             AskerSubject = conversation.OwnerSubject,
             AskerName = conversation.OwnerName,
+            Role = conversation.Role,
             PluginId = operation.PluginId,
             OperationId = operation.OperationId,
             Arguments = ResultFilter.Cap(ResultFilter.Json(arguments), 1000),
             Reason = reason,
+            Details = details?.ToList(),
             Created = time.GetUtcNow(),
         };
         proposals.Add(proposal);
+        var who =
+            proposal.Role == AssistantRoles.Player
+                ? $"the player {proposal.AskerName}"
+                : proposal.AskerName;
+        await notifier.PostAsync(
+            $"The assistant proposes `{proposal.Operation}` for {who}. Approve or reject it: {notifier.ApprovalsUrl}",
+            token
+        );
         return proposal;
     }
 
