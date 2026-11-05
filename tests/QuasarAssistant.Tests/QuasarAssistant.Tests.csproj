@@ -19,7 +19,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\src\QuasarAssistant\QuasarAssistant.csproj" />
+    <ProjectReference Include="..\..\src\QuasarAssistant.Quasar\QuasarAssistant.Quasar.csproj" />
   </ItemGroup>
 
   <ItemGroup>

@@ -32,6 +32,8 @@
 .assistant-order li span { display: inline-block; min-width: 160px; }
 
 .assistant-launcher { position: fixed; right: 20px; bottom: 20px; z-index: 1200; width: 48px; height: 48px; border-radius: 50%; border: none; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; background: var(--quasar-palette-primary, #56c8dc); color: var(--quasar-palette-primary-contrast-text, #0b0d10); box-shadow: 0 4px 14px #0006; }
+/* The Assistant page is a chat already, and the launcher would cover its Send button. */
+body:has(.assistant-page) :is(.assistant-launcher, .assistant-drawer) { display: none; }
 .assistant-launcher .assistant-icon { width: 24px; height: 24px; flex-basis: 24px; }
 .assistant-drawer { position: fixed; top: 0; right: 0; bottom: 0; z-index: 1200; width: min(440px, 100vw); display: flex; flex-direction: column; background: var(--quasar-palette-surface, #181c21); border-left: 1px solid var(--quasar-palette-lines-default, #303740); box-shadow: -6px 0 18px #0005; animation: assistant-slide-in .15s ease-out; }
 @keyframes assistant-slide-in { from { transform: translateX(100%); } to { transform: none; } }

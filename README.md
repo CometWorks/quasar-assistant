@@ -39,7 +39,7 @@ admins set up. No provider or model ships with it.
 | Page | Who | What |
 |---|---|---|
 | Drawer on every page | `CanUseAssistant` | A launcher button and a chat panel that starts with the page and server as context. |
-| `/assistant` | `CanUseAssistant` | Your conversations and a full-size chat. |
+| `/assistant/chat` | `CanUseAssistant` | Your conversations and a full-size chat. |
 | `/assistant/approvals` | `CanUseAssistant` | Pending and decided proposals. |
 | `/assistant/settings` | `CanManageSecurity` | Backends and API keys, the backend order, modes, limits, notifications and usage. |
 

@@ -1,5 +1,6 @@
 @page "/assistant"
-@page "/assistant/{ConversationId}"
+@page "/assistant/chat"
+@page "/assistant/chat/{ConversationId}"
 @attribute [Authorize(Policy = QuasarPolicyNames.CanUseAssistant)]
 @implements IDisposable
 @inject ConversationStore Conversations
@@ -8,12 +9,12 @@
 <PageTitle>Assistant</PageTitle>
 <div class="assistant-page">
     <nav class="assistant-conversations" aria-label="Your conversations">
-        <a class="assistant-button" href="assistant"><AssistantIcon Icon="@AssistantIcons.Add" />New conversation</a>
+        <a class="assistant-button" href="assistant/chat"><AssistantIcon Icon="@AssistantIcons.Add" />New conversation</a>
         <ul>
             @foreach (var conversation in _list)
             {
                 <li class="@(conversation.Id == ConversationId ? "assistant-current" : "")">
-                    <a href="@("assistant/" + conversation.Id)" aria-current="@(conversation.Id == ConversationId ? "page" : null)">
+                    <a href="@("assistant/chat/" + conversation.Id)" aria-current="@(conversation.Id == ConversationId ? "page" : null)">
                         <span>@conversation.Title</span>
                         <small>@conversation.Updated.ToUniversalTime().ToString("yyyy-MM-dd HH:mm") UTC</small>
                     </a>
@@ -30,7 +31,7 @@
         else
         {
             <ChatView @key="ConversationId" ConversationId="@ConversationId" Page="@(new PageContext(Navigation.Uri, null))"
-                      ConversationStarted="@(id => Navigation.NavigateTo("assistant/" + id))" />
+                      ConversationStarted="@(id => Navigation.NavigateTo("assistant/chat/" + id))" />
         }
     </section>
 </div>

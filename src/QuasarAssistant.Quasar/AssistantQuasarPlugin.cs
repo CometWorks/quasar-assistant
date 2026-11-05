@@ -32,7 +32,8 @@ public sealed class AssistantQuasarPlugin : IQuasarPlugin
     {
         yield return new QuasarNavItem(
             "Assistant",
-            "/assistant",
+            // Not "/assistant": the nav link matches by prefix, which would light it up on Approvals too.
+            "/assistant/chat",
             AssistantIcons.Assistant,
             QuasarNavZones.Tools,
             700,
