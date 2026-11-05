@@ -26,7 +26,8 @@ admins set up. No provider or model ships with it.
   assistant never does more than the asker could do by hand.
 - **Proposals.** In `propose` mode a change becomes a proposal in the audit log. Any admin whose permissions
   allow the operation approves or rejects it, as a card in the conversation or on the Approvals page. The
-  outcome goes back into the conversation. Proposals expire after 30 days.
+  outcome goes back into the conversation. Admins who could approve also get a web push notice, unless the
+  settings turn it off. Proposals expire after 30 days.
 - **Data.** Tool results have passwords, tokens and keys replaced by `<redacted>` and are cut to 16 KiB.
   Conversations are kept per person and deleted 30 days after their last message.
 - **Caching.** Every request of a role starts with the same bytes: the system prompt, the admins' notes and

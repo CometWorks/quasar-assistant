@@ -139,12 +139,12 @@
         <textarea class="assistant-wide" rows="4" maxlength="8000" @bind="_role.RoleText" aria-label="Notes for the assistant"></textarea>
 
         <h3>What the assistant may do</h3>
-        <p class="assistant-hint">Per area of operations: <strong>off</strong> hides them, <strong>read</strong> offers only reads, <strong>propose</strong> turns each change into a proposal an admin approves, <strong>apply</strong> runs changes at once. Every call is still checked against the asker's own permissions. Operations closed to agents in Quasar aren't listed.</p>
+        <p class="assistant-hint">Per area of operations: <strong>off</strong> hides them, <strong>read</strong> offers only reads, <strong>propose</strong> turns each change into a proposal an admin approves, <strong>apply</strong> runs changes at once. Every call is still checked against the asker's own permissions. Operations Quasar closes to agents, by its deny list and the current access rules, aren't listed.</p>
         <div class="assistant-table-wrap">
             <table>
                 <thead><tr><th scope="col">Area</th><th scope="col">Mode</th></tr></thead>
                 <tbody>
-                    @foreach (var area in Catalog.AgentOperations.Select(ToolCatalog.Area).Distinct().Order())
+                    @foreach (var area in _operations.Select(ToolCatalog.Area).Distinct().Order())
                     {
                         <tr>
                             <th scope="row">@area</th>
@@ -169,7 +169,7 @@
                 <table>
                     <thead><tr><th scope="col">Operation</th><th scope="col">Kind</th><th scope="col">Mode</th><th scope="col">Effective</th></tr></thead>
                     <tbody>
-                        @foreach (var operation in Catalog.AgentOperations)
+                        @foreach (var operation in _operations)
                         {
                             <tr>
                                 <th scope="row"><code>@operation.Key</code></th>
@@ -251,7 +251,13 @@
     private string? _testing;
     private readonly Dictionary<string, (bool Ok, string Text)> _tests = [];
 
-    protected override void OnInitialized() => Load();
+    private IReadOnlyList<Quasar.Plugin.Abstractions.Operations.QuasarOperation> _operations = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        Load();
+        _operations = await Catalog.AgentOperationsAsync();
+    }
 
     private void Load()
     {

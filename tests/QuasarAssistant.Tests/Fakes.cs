@@ -51,7 +51,24 @@ public sealed class DispatchLog
     /// <summary>Operation keys refused for the asker, as core would for missing policies.</summary>
     public ConcurrentDictionary<string, string> Refuse { get; } = new();
 
+    /// <summary>Operation keys core no longer offers to agents, as after an RBAC change.</summary>
+    public ConcurrentBag<string> Unavailable { get; } = [];
+
     public IEnumerable<string> Keys => Calls.Select(call => call.Key);
+}
+
+/// <summary>Like core: the deny list and the current rules decide, here the AgentAccess flag, the security
+/// prefix and the keys a test closes as an RBAC override would.</summary>
+public sealed class FakeAgentOperations(IEnumerable<QuasarOperation> operations, DispatchLog log)
+    : IQuasarAgentOperations
+{
+    public Task<bool> IsAvailableToAgentsAsync(string pluginId, string operationId) =>
+        Task.FromResult(
+            operations.FirstOrDefault(op => op.Key == pluginId + "/" + operationId) is { } operation
+                && operation.Metadata.AgentAccess == QuasarAgentAccess.Allowed
+                && !operationId.StartsWith("security.", StringComparison.Ordinal)
+                && !log.Unavailable.Contains(operation.Key)
+        );
 }
 
 public sealed class FakeDispatcher(IEnumerable<QuasarOperation> operations, DispatchLog log)
@@ -135,33 +152,31 @@ public sealed class FakeAuditLog : IQuasarAuditLog
         );
     }
 
+    /// <summary>What core answers on approval.</summary>
+    public QuasarOperationResult ApproveResult { get; set; } = new(200, new { done = true });
+    public List<(string Id, string? Reason, bool Expired)> Rejected { get; } = [];
+
+    public Task<QuasarOperationResult> ApproveAsync(
+        ClaimsPrincipal approver,
+        string proposalEntryId,
+        CancellationToken token
+    ) => Task.FromResult(ApproveResult);
+
+    public Task<QuasarOperationResult> RejectAsync(
+        ClaimsPrincipal? approver,
+        string proposalEntryId,
+        string? reason,
+        CancellationToken token
+    )
+    {
+        Rejected.Add((proposalEntryId, reason, approver is null));
+        return Task.FromResult(new QuasarOperationResult(200));
+    }
+
     public Task<IReadOnlyList<QuasarAuditEntry>> QueryAsync(
         QuasarAuditFilter filter,
         CancellationToken token
     ) => Task.FromResult<IReadOnlyList<QuasarAuditEntry>>([]);
-}
-
-public sealed class FakeDecisions : IProposalDecisions
-{
-    public QuasarOperationResult Result { get; set; } = new(200, new { done = true });
-    public List<(string Id, string Reason)> Rejected { get; } = [];
-
-    public Task<QuasarOperationResult> ApproveAsync(
-        ClaimsPrincipal approver,
-        string entryId,
-        CancellationToken token
-    ) => Task.FromResult(Result);
-
-    public Task RejectAsync(
-        ClaimsPrincipal? approver,
-        string entryId,
-        string reason,
-        CancellationToken token
-    )
-    {
-        Rejected.Add((entryId, reason));
-        return Task.CompletedTask;
-    }
 }
 
 public sealed class ManualTime : TimeProvider
@@ -179,8 +194,6 @@ public sealed class Harness : IAsyncDisposable
     public required ServiceProvider Services { get; init; }
     public DispatchLog Dispatched => Services.GetRequiredService<DispatchLog>();
     public FakeAuditLog Audit => (FakeAuditLog)Services.GetRequiredService<IQuasarAuditLog>();
-    public FakeDecisions Decisions =>
-        (FakeDecisions)Services.GetRequiredService<IProposalDecisions>();
     public SettingsStore Settings => Services.GetRequiredService<SettingsStore>();
     public AssistantRunner Runner => Services.GetRequiredService<AssistantRunner>();
     public ConversationStore Conversations => Services.GetRequiredService<ConversationStore>();
@@ -207,7 +220,22 @@ public sealed class Harness : IAsyncDisposable
         services.AddScoped<IQuasarOperationDispatcher, FakeDispatcher>();
         services.AddSingleton<IQuasarAgentPrincipals, FakePrincipals>();
         services.AddSingleton<IQuasarAuditLog, FakeAuditLog>();
-        services.AddSingleton<IProposalDecisions, FakeDecisions>();
+        services.AddScoped<IQuasarAgentOperations, FakeAgentOperations>();
+        services.AddAuthorizationCore(options =>
+        {
+            options.AddPolicy(
+                QuasarPolicyNames.CanView,
+                p => p.RequireRole("viewer", "editor", "admin")
+            );
+            options.AddPolicy(
+                QuasarPolicyNames.CanControlServers,
+                p => p.RequireRole("editor", "admin")
+            );
+            options.AddPolicy(
+                QuasarPolicyNames.CanActAsPlayer,
+                p => p.RequireAssertion(_ => false)
+            );
+        });
         services.AddQuasarAssistant(folder);
         return new Harness
         {
@@ -258,10 +286,18 @@ public sealed class Harness : IAsyncDisposable
             }
         );
 
-    public static ClaimsPrincipal Person(string name = "Ada", string subject = "steam:1") =>
+    public static ClaimsPrincipal Person(
+        string name = "Ada",
+        string subject = "steam:1",
+        string role = "admin"
+    ) =>
         new(
             new ClaimsIdentity(
-                [new Claim(ClaimTypes.NameIdentifier, subject), new Claim(ClaimTypes.Name, name)],
+                [
+                    new Claim(ClaimTypes.NameIdentifier, subject),
+                    new Claim(ClaimTypes.Name, name),
+                    new Claim(ClaimTypes.Role, role),
+                ],
                 "test"
             )
         );

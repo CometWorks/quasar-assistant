@@ -158,7 +158,7 @@ public sealed class AssistantRunner(
         );
         try
         {
-            var toolSet = catalog.For(role);
+            var toolSet = await catalog.ForAsync(role);
             var system = Prompt.System(role);
             outcome = "turn-limit";
             while (turns < role.MaxTurns)

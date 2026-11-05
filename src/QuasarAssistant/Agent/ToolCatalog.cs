@@ -6,8 +6,8 @@ using System.Text.Json.Nodes;
 using System.Text.Json.Schema;
 using System.Text.Json.Serialization.Metadata;
 using System.Text.RegularExpressions;
+using Microsoft.Extensions.DependencyInjection;
 using Quasar.Plugin.Abstractions.Operations;
-using Quasar.Plugin.Abstractions.Security;
 using QuasarAssistant.Llm;
 using QuasarAssistant.Settings;
 
@@ -26,40 +26,49 @@ public sealed record ToolSet(
 
 /// <summary>
 /// The registered operations a role may call, as tools in a fixed order (sorted by name) so the prompt prefix
-/// stays byte-identical between requests. A tool's mode comes from the role's settings; the operations core
-/// refuses to any agent are left out.
+/// stays byte-identical between requests. A tool's mode comes from the role's settings; core decides which
+/// operations agents may be offered at all, with its deny list and the current RBAC rules.
 /// </summary>
-public sealed partial class ToolCatalog(IEnumerable<QuasarOperation> operations)
+public sealed partial class ToolCatalog(
+    IEnumerable<QuasarOperation> operations,
+    IServiceScopeFactory scopes
+)
 {
-    // Mirrors the dispatcher's hard deny list for agents (QuasarOperationService in core). Core has no public
-    // method to ask, so this keeps such operations out of the prompt; the dispatcher still refuses them on a call.
-    private static readonly string[] AgentDeniedPrefixes =
-    [
-        "security.",
-        "rbac.",
-        "auth.",
-        "service-principals.",
-        "update.",
-        "updates.",
-        "workshop.credentials",
-        "discord.token",
-        "assistant.settings",
-        "llm.",
-    ];
-
     private static readonly JsonSerializerOptions SchemaOptions = new(JsonSerializerDefaults.Web)
     {
         TypeInfoResolver = new DefaultJsonTypeInfoResolver(),
     };
     private readonly IReadOnlyList<QuasarOperation> _operations = operations
+        .Where(op => op.Kind is QuasarOperationKind.Json or QuasarOperationKind.Read)
         .OrderBy(op => op.Key, StringComparer.Ordinal)
         .ToList();
-    private readonly ConditionalWeakTable<RoleSettings, ToolSet> _cache = [];
 
-    /// <summary>Operations an agent may ever reach, with their area, for the settings page.</summary>
-    public IEnumerable<QuasarOperation> AgentOperations => _operations.Where(IsAgentReachable);
+    // The last tool set per role settings, with the operations core allowed when it was built.
+    private readonly ConditionalWeakTable<RoleSettings, Tuple<string, ToolSet>> _cache = [];
 
-    public ToolSet For(RoleSettings role) => _cache.GetValue(role, Build);
+    /// <summary>The JSON and read operations core may offer to agents now, for the tools and the settings page.</summary>
+    public async Task<IReadOnlyList<QuasarOperation>> AgentOperationsAsync()
+    {
+        await using var scope = scopes.CreateAsyncScope();
+        var agents = scope.ServiceProvider.GetRequiredService<IQuasarAgentOperations>();
+        List<QuasarOperation> available = [];
+        foreach (var operation in _operations)
+            if (await agents.IsAvailableToAgentsAsync(operation.PluginId, operation.OperationId))
+                available.Add(operation);
+        return available;
+    }
+
+    public async Task<ToolSet> ForAsync(RoleSettings role)
+    {
+        var available = await AgentOperationsAsync();
+        // An RBAC change can open or close operations, so the set is part of the cache key.
+        var signature = string.Join('\n', available.Select(op => op.Key));
+        if (_cache.TryGetValue(role, out var cached) && cached.Item1 == signature)
+            return cached.Item2;
+        var tools = Build(role, available);
+        _cache.AddOrUpdate(role, Tuple.Create(signature, tools));
+        return tools;
+    }
 
     public static ToolMode EffectiveMode(QuasarOperation operation, RoleSettings role) =>
         role.OperationModes.TryGetValue(operation.Key, out var mode) ? mode
@@ -82,24 +91,10 @@ public sealed partial class ToolCatalog(IEnumerable<QuasarOperation> operations)
     private static QuasarOperationMetadata Resolved(QuasarOperation operation) =>
         operation.Metadata.ResolveFor(operation.Kind, operation.OperationId);
 
-    private static bool IsAgentReachable(QuasarOperation operation) =>
-        operation.Kind is QuasarOperationKind.Json or QuasarOperationKind.Read
-        && operation.Metadata.AgentAccess == QuasarAgentAccess.Allowed
-        && !operation.DefaultPolicies.Any(policy =>
-            policy.Equals(QuasarPolicyNames.CanManageSecurity, StringComparison.OrdinalIgnoreCase)
-            || policy.Equals(
-                QuasarPolicyNames.CanShutdownQuasar,
-                StringComparison.OrdinalIgnoreCase
-            )
-        )
-        && !AgentDeniedPrefixes.Any(prefix =>
-            operation.OperationId.StartsWith(prefix, StringComparison.Ordinal)
-        );
-
-    private ToolSet Build(RoleSettings role)
+    private static ToolSet Build(RoleSettings role, IReadOnlyList<QuasarOperation> available)
     {
         Dictionary<string, AgentTool> tools = [];
-        foreach (var operation in AgentOperations)
+        foreach (var operation in available)
         {
             var mode = EffectiveMode(operation, role);
             if (!IsOffered(operation, mode))
@@ -133,7 +128,7 @@ public sealed partial class ToolCatalog(IEnumerable<QuasarOperation> operations)
 
     private static string Describe(AgentTool tool)
     {
-        var text = OperationInfo.Description(tool.Operation) ?? tool.Operation.Key;
+        var text = tool.Operation.Metadata.Description ?? tool.Operation.Key;
         if (!tool.IsChange)
             return text + "\nReads only.";
         var reversal = tool.Operation.Metadata.Reversal switch
@@ -153,7 +148,7 @@ public sealed partial class ToolCatalog(IEnumerable<QuasarOperation> operations)
 
     private static JsonElement Schema(QuasarOperation operation)
     {
-        var type = OperationInfo.RequestType(operation);
+        var type = operation.RequestType;
         JsonNode? schema = type is null
             ? null
             : JsonSchemaExporter.GetJsonSchemaAsNode(

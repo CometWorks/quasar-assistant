@@ -2,6 +2,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Quasar.Plugin.Abstractions.Assistant;
 using QuasarAssistant.Agent;
 using QuasarAssistant.Llm;
 using QuasarAssistant.Settings;
@@ -30,7 +31,7 @@ public static class AssistantServiceCollectionExtensions
         services.AddSingleton<ToolExecutor>();
         services.AddSingleton<ProposalService>();
         services.AddSingleton<AssistantRunner>();
-        services.TryAddSingleton<IProposalDecisions, MissingCoreProposalDecisions>();
+        services.AddSingleton<IQuasarNoticeSource, ProposalNotices>();
         services.AddHostedService<AssistantMaintenance>();
         return services;
     }
