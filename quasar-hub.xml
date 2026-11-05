@@ -1,14 +1,24 @@
 <?xml version="1.0"?>
-<PluginData xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:type="GitHubPlugin">
-    <Id>00000000-0000-0000-0000-000000000000</Id>
-    <RepoId>todo-github-user/template-plugin</RepoId>
-    <FriendlyName>Template Plugin</FriendlyName>
-    <Author>TODO Author Name</Author>
-    <Tooltip>Example Quasar UI plugin built from the template.</Tooltip>
-    <Description>Example Quasar UI plugin. Replace this text with the actual plugin purpose, pages, extension points, and companion Magnetar plugins.</Description>
-    <PluginKind>QuasarUiPlugin</PluginKind>
-    <ProjectPath>src/TemplatePlugin.Quasar/TemplatePlugin.Quasar.csproj</ProjectPath>
-    <PackageManifest>quasar-plugin.json</PackageManifest>
-    <QuasarVersion>&gt;=1.1.0</QuasarVersion>
-    <Commit>TODO Git commit hash</Commit>
+<PluginData
+  xmlns:xsd="http://www.w3.org/2001/XMLSchema"
+  xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+  xsi:type="GitHubPlugin"
+>
+  <Id>9b1f4c2e-6a37-4d0b-8e52-3f7a1c9d0e64</Id>
+  <RepoId>CometWorks/quasar-assistant</RepoId>
+  <FriendlyName>Assistant</FriendlyName>
+  <Author>CometWorks</Author>
+  <Tooltip>An admin assistant that reads and changes your servers through Quasar's operations.</Tooltip>
+  <Description>
+    An admin assistant for Quasar. Admins chat with it in a drawer on every page or on its own page. It answers
+    from Quasar's operations: it reads server status, logs, settings and players, and it changes things or
+    proposes changes for another admin to approve, as the admins allow per area. Every call is checked against
+    the asking admin's own permissions and written to Quasar's audit log. Bring your own models: an
+    OpenAI-compatible API (OpenRouter, OpenAI, llama.cpp, vLLM) or the Anthropic API, with failover between them.
+  </Description>
+  <PluginKind>QuasarUiPlugin</PluginKind>
+  <ProjectPath>src/QuasarAssistant.Quasar/QuasarAssistant.Quasar.csproj</ProjectPath>
+  <PackageManifest>quasar-plugin.json</PackageManifest>
+  <QuasarVersion>&gt;=1.6.0</QuasarVersion>
+  <Commit>TODO the exact plugin commit when publishing</Commit>
 </PluginData>

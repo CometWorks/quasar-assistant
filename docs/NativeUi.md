@@ -1,7 +1,7 @@
 # Native Quasar UI
 
 Use semantic HTML, Blazor event binding, and scoped CSS for ordinary plugin UI.
-The template and preview host have no MudBlazor dependency. Custom canvas,
+The plugin has no MudBlazor dependency. Custom canvas,
 WebGL, and Three.js surfaces keep their existing rendering systems.
 
 ## Appearance
@@ -27,20 +27,20 @@ Other useful tokens include `background`, `background-gray`, `text-secondary`,
 `hover-contrast-text`, and the `info`, `success`, `warning`, and `error` colors
 with their corresponding `*-contrast-text` values. Host tokens are inherited
 through the DOM, so a native `<dialog>` in the shell keeps the selected palette
-when the browser puts it in the top layer. The standalone preview supplies
-sample light/dark palettes; production styling comes from the host.
+when the browser puts it in the top layer. `assistant.css` gives each token a
+dark fallback; production styling comes from the host.
 
 Declare plugin stylesheets in `quasar-plugin.json` relative to `staticAssets`.
 Quasar injects them after core CSS. Scope selectors to your plugin to avoid
 changing other pages. Installed plugin assets use `/_quasar/plugins/<id>/`;
-`/_content/<assembly>/` is the Razor class library path used by the preview host.
+`/_content/<assembly>/` is the Razor class library path.
 
 ## Controls and behavior
 
 - Use `<button type="button">` for actions, `<a>`/`NavLink` for navigation,
   and `<form>` with a submit button for keyboard-friendly form submission.
 - Label inputs and icon buttons. Retain existing SVG paths where possible; the
-  template's `TemplateIcons` and `TemplateIcon` reuse the original Material
+  plugin's `AssistantIcons` and `AssistantIcon` reuse the original Material
   icons and include their Apache license.
 - Use native `<details>`, `<progress>`, and `<table>` where appropriate. Keep
   wide tables inside a scrolling container and use column/row header semantics.
@@ -53,7 +53,7 @@ changing other pages. Installed plugin assets use `/_quasar/plugins/<id>/`;
 - Show asynchronous errors and success messages with `role="alert"` or
   `role="status"`. Dispose event subscriptions, timers, and JS interop references.
 
-Build both the preview host and Quasar adapter. Check light/dark modes, custom
+Build the Quasar adapter. Check light/dark modes, custom
 branding, keyboard navigation, and narrow layouts before publishing a pinned
 plugin revision. Existing Mud-dependent plugins still need their own migration
 before Quasar can remove the compatibility providers and assets.
