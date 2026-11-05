@@ -1075,8 +1075,14 @@ def run(keep: bool) -> int:
         chat = Chat(CLIENT.api())
         scenario(chat, ui)
         ui.goto("/assistant/settings")
+        # The sidebar scrolls on its own, and a full-page shot leaves its Settings group out.
+        settings_link = ui.page.locator('a.quasar-nav-link[href$="assistant/settings"]')
+        log(
+            f"nav: Assistant settings link {'present' if settings_link.count() else 'MISSING'}"
+        )
+        ui.page.eval_on_selector(".quasar-sidebar", "e => e.scrollTop = e.scrollHeight")
         ui.shot("settings")
-        ui.goto("/assistant")
+        ui.goto("/assistant/chat")
         ui.shot("assistant-page")
         ui.goto("/assistant/approvals")
         ui.shot("approvals-final")
