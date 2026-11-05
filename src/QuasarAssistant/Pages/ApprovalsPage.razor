@@ -1,0 +1,39 @@
+@page "/assistant/approvals"
+@attribute [Authorize(Policy = QuasarPolicyNames.CanUseAssistant)]
+@implements IDisposable
+@inject ProposalStore Proposals
+
+<PageTitle>Approvals</PageTitle>
+<div class="assistant-surface">
+    <h1>Approvals</h1>
+    <p class="assistant-hint">Changes the assistant proposed. Approving runs the change as the assistant acting for the person who asked, and Quasar checks both of you again at that moment.</p>
+
+    <h2>Waiting</h2>
+    @if (!Proposals.Pending.Any())
+    {
+        <p>Nothing waits for approval.</p>
+    }
+    @foreach (var proposal in Proposals.Pending.OrderBy(p => p.Created))
+    {
+        <ProposalCard @key="proposal.Id" Proposal="proposal" ShowAsker="true" />
+    }
+
+    <h2>Decided</h2>
+    @{ var decided = Proposals.All.Where(p => p.Status != ProposalStatus.Pending).OrderByDescending(p => p.Decided).Take(50).ToList(); }
+    @if (decided.Count == 0)
+    {
+        <p>No decisions yet.</p>
+    }
+    @foreach (var proposal in decided)
+    {
+        <ProposalCard @key="proposal.Id" Proposal="proposal" ShowAsker="true" />
+    }
+</div>
+
+@code {
+    protected override void OnInitialized() => Proposals.Changed += OnChanged;
+
+    private void OnChanged() => _ = InvokeAsync(StateHasChanged);
+
+    public void Dispose() => Proposals.Changed -= OnChanged;
+}

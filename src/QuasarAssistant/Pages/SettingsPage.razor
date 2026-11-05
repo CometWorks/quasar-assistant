@@ -1,0 +1,527 @@
+@page "/assistant/settings"
+@attribute [Authorize(Policy = QuasarPolicyNames.CanManageSecurity)]
+@using System.Diagnostics
+@using System.Text.Json.Nodes
+@inject SettingsStore Store
+@inject ToolCatalog Catalog
+@inject LlmClient Client
+@inject MetricsLog Metrics
+@inject TimeProvider Time
+
+<PageTitle>Assistant settings</PageTitle>
+<div class="assistant-surface assistant-settings">
+    <h1>Assistant settings</h1>
+    @if (_message is not null)
+    {
+        <p class="@(_failed ? "assistant-error" : "assistant-notice")" role="@(_failed ? "alert" : "status")">@_message</p>
+    }
+
+    <section>
+        <h2>Models</h2>
+        <p class="assistant-hint">Each backend is one model at one provider. The admin assistant tries its backends in the order below and moves to the next one when a backend fails, as Clangy does.</p>
+        <div class="assistant-table-wrap">
+            <table>
+                <thead><tr><th scope="col">Name</th><th scope="col">Kind</th><th scope="col">Model</th><th scope="col">API key</th><th scope="col">Test</th><th scope="col"><span class="assistant-visually-hidden">Actions</span></th></tr></thead>
+                <tbody>
+                    @foreach (var backend in _settings.Backends.OrderBy(b => b.Priority).ThenBy(b => b.Name))
+                    {
+                        <tr>
+                            <th scope="row">@backend.Name</th>
+                            <td>@(backend.Kind == BackendKind.Anthropic ? "Anthropic" : "OpenAI-compatible")</td>
+                            <td><code>@backend.Model</code></td>
+                            <td>@(Store.HasApiKey(backend.Name) ? "set" : "none")</td>
+                            <td>
+                                <button type="button" class="assistant-button" disabled="@(_testing == backend.Name)" @onclick="() => TestAsync(backend)">Test</button>
+                                @if (_tests.TryGetValue(backend.Name, out var test))
+                                {
+                                    <span class="@(test.Ok ? "assistant-ok" : "assistant-error")">@test.Text</span>
+                                }
+                            </td>
+                            <td>
+                                <button type="button" class="assistant-button" @onclick="() => Edit(backend)">Edit</button>
+                                <button type="button" class="assistant-icon-button" title="Delete @backend.Name" aria-label="Delete @backend.Name" @onclick="() => DeleteBackend(backend)"><AssistantIcon Icon="@AssistantIcons.Delete" /></button>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+        @if (_form is null)
+        {
+            <button type="button" class="assistant-button" @onclick="() => Edit(null)"><AssistantIcon Icon="@AssistantIcons.Add" />Add a backend</button>
+        }
+        else
+        {
+            <form class="assistant-form" @onsubmit="SaveBackend">
+                <h3>@(_form.Original is null ? "New backend" : "Edit " + _form.Original)</h3>
+                <label>Name <input required maxlength="64" @bind="_form.Name" /></label>
+                <label>Kind
+                    <select @bind="_form.Kind">
+                        <option value="@BackendKind.OpenAi">OpenAI-compatible (OpenRouter, OpenAI, llama.cpp, vLLM)</option>
+                        <option value="@BackendKind.Anthropic">Anthropic Messages API</option>
+                    </select>
+                </label>
+                <label>Base URL, with /v1 <input required type="url" @bind="_form.BaseUrl" placeholder="https://openrouter.ai/api/v1" /></label>
+                <label>Model <input required @bind="_form.Model" /></label>
+                <label>API key
+                    <input type="password" autocomplete="new-password" @bind="_form.ApiKey"
+                           placeholder="@(_form.Original is not null && Store.HasApiKey(_form.Original) ? "Set. Type a new key to replace it." : "Not set")" />
+                </label>
+                @if (_form.Original is not null && Store.HasApiKey(_form.Original))
+                {
+                    <label class="assistant-check"><input type="checkbox" @bind="_form.RemoveKey" /> Remove the stored key</label>
+                }
+                <label>Priority (lower first in this list) <input type="number" min="0" @bind="_form.Priority" /></label>
+                <label>Parallel requests <input type="number" min="1" max="64" @bind="_form.Parallel" /></label>
+                <label>Context window (tokens) <input type="number" min="1024" @bind="_form.ContextWindow" /></label>
+                <label>Max tokens per answer <input type="number" min="16" @bind="_form.MaxTokens" /></label>
+                <label>Thinking
+                    <select @bind="_form.Thinking">
+                        @foreach (var level in Enum.GetValues<ThinkingLevel>())
+                        {
+                            <option value="@level">@level</option>
+                        }
+                    </select>
+                </label>
+                <label>First-byte timeout (s, empty: none) <input type="number" min="1" step="any" @bind="_form.FirstByteTimeout" /></label>
+                <label>Stall timeout (s, empty: none) <input type="number" min="1" step="any" @bind="_form.StallTimeout" /></label>
+                <label>Cooldown (s) <input type="number" min="0" step="any" @bind="_form.Cooldown" /></label>
+                <label>Maximum cooldown (s) <input type="number" min="0" step="any" @bind="_form.MaxCooldown" /></label>
+                <label>Headers, one <code>Name: value</code> per line (keys go in the API key field) <textarea rows="3" @bind="_form.Headers"></textarea></label>
+                <label>Extra body, a JSON object merged into each request <textarea rows="3" @bind="_form.ExtraBody" placeholder='{"provider": {"sort": "price"}}'></textarea></label>
+                <div class="assistant-row">
+                    <button type="submit" class="assistant-button assistant-button-primary">Save backend</button>
+                    <button type="button" class="assistant-button" @onclick="() => _form = null">Cancel</button>
+                </div>
+            </form>
+        }
+    </section>
+
+    <section>
+        <h2>Admin assistant</h2>
+        <h3>Backends, in failover order</h3>
+        <ol class="assistant-order">
+            @foreach (var (name, index) in _role.Backends.Select((name, index) => (name, index)))
+            {
+                <li>
+                    <span>@name</span>
+                    <button type="button" class="assistant-icon-button" title="Move up" aria-label="Move @name up" disabled="@(index == 0)" @onclick="() => Move(index, -1)"><AssistantIcon Icon="@AssistantIcons.Up" /></button>
+                    <button type="button" class="assistant-icon-button" title="Move down" aria-label="Move @name down" disabled="@(index == _role.Backends.Count - 1)" @onclick="() => Move(index, 1)"><AssistantIcon Icon="@AssistantIcons.Down" /></button>
+                    <button type="button" class="assistant-icon-button" title="Remove" aria-label="Remove @name" @onclick="() => _role.Backends.RemoveAt(index)"><AssistantIcon Icon="@AssistantIcons.Close" /></button>
+                </li>
+            }
+        </ol>
+        @{ var unused = _settings.Backends.Select(b => b.Name).Except(_role.Backends).ToList(); }
+        @if (unused.Count > 0)
+        {
+            <div class="assistant-row">
+                <select @bind="_addBackend" aria-label="Backend to add">
+                    <option value="">Choose a backend</option>
+                    @foreach (var name in unused)
+                    {
+                        <option value="@name">@name</option>
+                    }
+                </select>
+                <button type="button" class="assistant-button" disabled="@string.IsNullOrEmpty(_addBackend)" @onclick="AddToRole">Add</button>
+            </div>
+        }
+
+        <h3>Limits</h3>
+        <div class="assistant-form">
+            <label>Runs at once <input type="number" min="1" max="32" @bind="_role.MaxConcurrentRuns" /></label>
+            <label>Queue wait (s) <input type="number" min="1" @bind="_role.QueueWaitSeconds" /></label>
+            <label>Run deadline (s) <input type="number" min="10" @bind="_role.RunDeadlineSeconds" /></label>
+            <label>Model turns per run <input type="number" min="1" max="200" @bind="_role.MaxTurns" /></label>
+        </div>
+
+        <h3>Notes for the assistant</h3>
+        <p class="assistant-hint">Added to the system prompt, for example what your servers are for. Every request sends it, so keep it short and stable.</p>
+        <textarea class="assistant-wide" rows="4" maxlength="8000" @bind="_role.RoleText" aria-label="Notes for the assistant"></textarea>
+
+        <h3>What the assistant may do</h3>
+        <p class="assistant-hint">Per area of operations: <strong>off</strong> hides them, <strong>read</strong> offers only reads, <strong>propose</strong> turns each change into a proposal an admin approves, <strong>apply</strong> runs changes at once. Every call is still checked against the asker's own permissions. Operations closed to agents in Quasar aren't listed.</p>
+        <div class="assistant-table-wrap">
+            <table>
+                <thead><tr><th scope="col">Area</th><th scope="col">Mode</th></tr></thead>
+                <tbody>
+                    @foreach (var area in Catalog.AgentOperations.Select(ToolCatalog.Area).Distinct().Order())
+                    {
+                        <tr>
+                            <th scope="row">@area</th>
+                            <td>
+                                <select value="@(_role.AreaModes.TryGetValue(area, out var mode) ? mode.ToString() : "")" aria-label="Mode for @area"
+                                        @onchange="e => SetMode(_role.AreaModes, area, (string?)e.Value)">
+                                    <option value="">Default (reads: read, changes: propose)</option>
+                                    @foreach (var option in Enum.GetValues<ToolMode>())
+                                    {
+                                        <option value="@option">@option</option>
+                                    }
+                                </select>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+        <details>
+            <summary>Per operation</summary>
+            <div class="assistant-table-wrap">
+                <table>
+                    <thead><tr><th scope="col">Operation</th><th scope="col">Kind</th><th scope="col">Mode</th><th scope="col">Effective</th></tr></thead>
+                    <tbody>
+                        @foreach (var operation in Catalog.AgentOperations)
+                        {
+                            <tr>
+                                <th scope="row"><code>@operation.Key</code></th>
+                                <td>@(ToolCatalog.Effect(operation) == Quasar.Plugin.Abstractions.Operations.QuasarOperationEffect.Read ? "read" : "change")</td>
+                                <td>
+                                    <select value="@(_role.OperationModes.TryGetValue(operation.Key, out var mode) ? mode.ToString() : "")" aria-label="Mode for @operation.Key"
+                                            @onchange="e => SetMode(_role.OperationModes, operation.Key, (string?)e.Value)">
+                                        <option value="">Area's mode</option>
+                                        @foreach (var option in Enum.GetValues<ToolMode>())
+                                        {
+                                            <option value="@option">@option</option>
+                                        }
+                                    </select>
+                                </td>
+                                <td>@(ToolCatalog.IsOffered(operation, ToolCatalog.EffectiveMode(operation, _role.ToSettings())) ? ToolCatalog.EffectiveMode(operation, _role.ToSettings()).ToString() : "not offered")</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </details>
+    </section>
+
+    <section>
+        <h2>General</h2>
+        <div class="assistant-form">
+            <label>Tool result limit (bytes) <input type="number" min="1024" max="1048576" @bind="_general.ResultCapBytes" /></label>
+            <label>Delete conversations after (days) <input type="number" min="1" @bind="_general.ConversationRetentionDays" /></label>
+            <label>Proposals expire after (days) <input type="number" min="1" @bind="_general.ProposalExpiryDays" /></label>
+            <label class="assistant-check"><input type="checkbox" @bind="_general.WebPush" /> Web push to the admins who could approve a proposal</label>
+            <label class="assistant-check"><input type="checkbox" @bind="_general.Discord" /> Post proposals in the admin Discord channel (not available yet)</label>
+        </div>
+        <p class="assistant-hint">Proposal cards in the conversation and the Approvals page are always on.</p>
+        <button type="button" class="assistant-button assistant-button-primary" @onclick="SaveRole">Save the assistant settings</button>
+    </section>
+
+    <section>
+        <h2>Usage, last 14 days</h2>
+        @{ var summary = Metrics.Summarize(Time.GetUtcNow().AddDays(-14)); }
+        <div class="assistant-table-wrap">
+            <table>
+                <thead><tr><th scope="col">Day (UTC)</th><th scope="col">Runs</th><th scope="col">Not answered</th><th scope="col">Prompt tokens</th><th scope="col">Of them cached</th></tr></thead>
+                <tbody>
+                    @foreach (var day in summary.Days)
+                    {
+                        <tr>
+                            <th scope="row">@day.Day.ToString("yyyy-MM-dd")</th>
+                            <td>@day.Runs</td>
+                            <td>@day.Failed</td>
+                            <td>@day.PromptTokens</td>
+                            <td>@day.CachedTokens (@(day.PromptTokens == 0 ? 0 : 100 * day.CachedTokens / day.PromptTokens)%)</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+        <div class="assistant-table-wrap">
+            <table>
+                <thead><tr><th scope="col">Backend</th><th scope="col">Answered turns</th><th scope="col">Failures</th><th scope="col">Passed over</th></tr></thead>
+                <tbody>
+                    @foreach (var backend in summary.Backends)
+                    {
+                        <tr><th scope="row">@backend.Backend</th><td>@backend.Answers</td><td>@backend.Failures</td><td>@backend.Fallovers</td></tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </section>
+</div>
+
+@code {
+    private AssistantSettings _settings = new();
+    private RoleForm _role = new();
+    private GeneralForm _general = new();
+    private BackendForm? _form;
+    private string? _addBackend;
+    private string? _message;
+    private bool _failed;
+    private string? _testing;
+    private readonly Dictionary<string, (bool Ok, string Text)> _tests = [];
+
+    protected override void OnInitialized() => Load();
+
+    private void Load()
+    {
+        _settings = Store.Current;
+        _role = RoleForm.From(_settings.Role(AssistantRoles.Admin));
+        _general = GeneralForm.From(_settings);
+    }
+
+    private void Edit(BackendSettings? backend) => _form = BackendForm.From(backend);
+
+    private void SaveBackend()
+    {
+        if (_form is null)
+            return;
+        if (_form.Validate(_settings) is { } problem)
+        {
+            Say(problem, failed: true);
+            return;
+        }
+        var backend = _form.ToSettings();
+        var backends = _settings.Backends.Where(b => b.Name != _form.Original).Append(backend).ToList();
+        var roles = _settings.Roles.ToDictionary(
+            pair => pair.Key,
+            pair => pair.Value with { Backends = pair.Value.Backends.Select(name => name == _form.Original ? backend.Name : name).ToList() }
+        );
+        if (_form.Original is not null)
+            Store.RenameApiKey(_form.Original, backend.Name);
+        Store.Save(_settings with { Backends = backends, Roles = roles });
+        if (_form.RemoveKey)
+            Store.SetApiKey(backend.Name, null);
+        else if (!string.IsNullOrEmpty(_form.ApiKey))
+            Store.SetApiKey(backend.Name, _form.ApiKey.Trim());
+        _form = null;
+        Load();
+        Say($"Saved {backend.Name}.");
+    }
+
+    private void DeleteBackend(BackendSettings backend)
+    {
+        var roles = _settings.Roles.ToDictionary(
+            pair => pair.Key,
+            pair => pair.Value with { Backends = pair.Value.Backends.Where(name => name != backend.Name).ToList() }
+        );
+        Store.Save(_settings with { Backends = _settings.Backends.Where(b => b.Name != backend.Name).ToList(), Roles = roles });
+        Load();
+        Say($"Deleted {backend.Name}.");
+    }
+
+    private void Move(int index, int by)
+    {
+        (_role.Backends[index], _role.Backends[index + by]) = (_role.Backends[index + by], _role.Backends[index]);
+    }
+
+    private void AddToRole()
+    {
+        if (!string.IsNullOrEmpty(_addBackend))
+            _role.Backends.Add(_addBackend);
+        _addBackend = null;
+    }
+
+    private static void SetMode(Dictionary<string, ToolMode> modes, string key, string? value)
+    {
+        if (Enum.TryParse<ToolMode>(value, out var mode))
+            modes[key] = mode;
+        else
+            modes.Remove(key);
+    }
+
+    private void SaveRole()
+    {
+        var current = Store.Current;
+        var roles = new Dictionary<string, RoleSettings>(current.Roles) { [AssistantRoles.Admin] = _role.ToSettings() };
+        Store.Save(_general.Apply(current) with { Roles = roles });
+        Load();
+        Say("Saved the assistant settings.");
+    }
+
+    // A real one-line completion, outside the failover, so a test never cools a backend down.
+    private async Task TestAsync(BackendSettings backend)
+    {
+        _testing = backend.Name;
+        var clock = Stopwatch.StartNew();
+        TimeSpan? firstText = null;
+        try
+        {
+            var request = new ChatRequest(
+                "Answer in one short line.",
+                [],
+                [new ChatMessage { Role = ChatRole.User, Text = "Say hello." }]
+            );
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(120));
+            var answer = await Client.SendAsync(backend with { MaxTokens = Math.Min(backend.MaxTokens, 1024) }, Store.ApiKey(backend.Name), request,
+                text => firstText ??= text.Length > 0 ? clock.Elapsed : null, timeout.Token);
+            var first = firstText is { } t ? $", first text after {t.TotalSeconds:0.0} s" : "";
+            _tests[backend.Name] = (true, $"OK in {clock.Elapsed.TotalSeconds:0.0} s{first}: {Short(answer.Text)}");
+        }
+        catch (Exception error) when (error is BackendFailure or BackendRejected or OperationCanceledException)
+        {
+            _tests[backend.Name] = (false, $"Failed after {clock.Elapsed.TotalSeconds:0.0} s: {error.Message}");
+        }
+        finally
+        {
+            _testing = null;
+        }
+    }
+
+    private static string Short(string text) => text.Length > 120 ? text[..120] + "…" : text;
+
+    private void Say(string message, bool failed = false)
+    {
+        _message = message;
+        _failed = failed;
+    }
+
+    private sealed class RoleForm
+    {
+        public List<string> Backends { get; set; } = [];
+        public string RoleText { get; set; } = "";
+        public Dictionary<string, ToolMode> AreaModes { get; set; } = [];
+        public Dictionary<string, ToolMode> OperationModes { get; set; } = [];
+        public int MaxConcurrentRuns { get; set; }
+        public int QueueWaitSeconds { get; set; }
+        public int RunDeadlineSeconds { get; set; }
+        public int MaxTurns { get; set; }
+
+        public static RoleForm From(RoleSettings role) => new()
+        {
+            Backends = [.. role.Backends],
+            RoleText = role.RoleText,
+            AreaModes = new(role.AreaModes),
+            OperationModes = new(role.OperationModes),
+            MaxConcurrentRuns = role.MaxConcurrentRuns,
+            QueueWaitSeconds = role.QueueWaitSeconds,
+            RunDeadlineSeconds = role.RunDeadlineSeconds,
+            MaxTurns = role.MaxTurns,
+        };
+
+        public RoleSettings ToSettings() => new()
+        {
+            Backends = [.. Backends],
+            RoleText = RoleText.Trim(),
+            AreaModes = new(AreaModes),
+            OperationModes = new(OperationModes),
+            MaxConcurrentRuns = Math.Max(1, MaxConcurrentRuns),
+            QueueWaitSeconds = Math.Max(1, QueueWaitSeconds),
+            RunDeadlineSeconds = Math.Max(10, RunDeadlineSeconds),
+            MaxTurns = Math.Max(1, MaxTurns),
+        };
+    }
+
+    private sealed class GeneralForm
+    {
+        public int ResultCapBytes { get; set; }
+        public int ConversationRetentionDays { get; set; }
+        public int ProposalExpiryDays { get; set; }
+        public bool WebPush { get; set; }
+        public bool Discord { get; set; }
+
+        public static GeneralForm From(AssistantSettings settings) => new()
+        {
+            ResultCapBytes = settings.ResultCapBytes,
+            ConversationRetentionDays = settings.ConversationRetentionDays,
+            ProposalExpiryDays = settings.ProposalExpiryDays,
+            WebPush = settings.Notifications.WebPush,
+            Discord = settings.Notifications.Discord,
+        };
+
+        public AssistantSettings Apply(AssistantSettings settings) => settings with
+        {
+            ResultCapBytes = Math.Clamp(ResultCapBytes, 1024, 1024 * 1024),
+            ConversationRetentionDays = Math.Max(1, ConversationRetentionDays),
+            ProposalExpiryDays = Math.Max(1, ProposalExpiryDays),
+            Notifications = new() { WebPush = WebPush, Discord = Discord },
+        };
+    }
+
+    private sealed class BackendForm
+    {
+        public string? Original { get; set; }
+        public string Name { get; set; } = "";
+        public BackendKind Kind { get; set; }
+        public string BaseUrl { get; set; } = "";
+        public string Model { get; set; } = "";
+        public string? ApiKey { get; set; }
+        public bool RemoveKey { get; set; }
+        public int Priority { get; set; }
+        public int Parallel { get; set; }
+        public int ContextWindow { get; set; }
+        public int MaxTokens { get; set; }
+        public ThinkingLevel Thinking { get; set; }
+        public double? FirstByteTimeout { get; set; }
+        public double? StallTimeout { get; set; }
+        public double Cooldown { get; set; }
+        public double MaxCooldown { get; set; }
+        public string Headers { get; set; } = "";
+        public string ExtraBody { get; set; } = "";
+
+        public static BackendForm From(BackendSettings? backend)
+        {
+            var b = backend ?? new BackendSettings();
+            return new()
+            {
+                Original = backend?.Name,
+                Name = b.Name,
+                Kind = b.Kind,
+                BaseUrl = b.BaseUrl,
+                Model = b.Model,
+                Priority = b.Priority,
+                Parallel = b.Parallel,
+                ContextWindow = b.ContextWindow,
+                MaxTokens = b.MaxTokens,
+                Thinking = b.Thinking,
+                FirstByteTimeout = b.FirstByteTimeout,
+                StallTimeout = b.StallTimeout,
+                Cooldown = b.Cooldown,
+                MaxCooldown = b.MaxCooldown,
+                Headers = string.Join('\n', b.Headers.Select(pair => $"{pair.Key}: {pair.Value}")),
+                ExtraBody = b.ExtraBody?.ToJsonString() ?? "",
+            };
+        }
+
+        public string? Validate(AssistantSettings settings)
+        {
+            if (string.IsNullOrWhiteSpace(Name))
+                return "A backend needs a name.";
+            if (Name.Trim() != Original && settings.Backends.Any(b => b.Name == Name.Trim()))
+                return $"There is already a backend named {Name.Trim()}.";
+            if (!Uri.TryCreate(BaseUrl.Trim(), UriKind.Absolute, out var url) || url.Scheme is not ("http" or "https"))
+                return "The base URL must be an http or https URL.";
+            if (string.IsNullOrWhiteSpace(Model))
+                return "A backend needs a model.";
+            if (Headers.Split('\n').Any(line => line.Trim().Length > 0 && !line.Contains(':')))
+                return "Write each header as Name: value.";
+            if (ExtraBody.Trim().Length > 0)
+            {
+                try
+                {
+                    if (JsonNode.Parse(ExtraBody) is not JsonObject)
+                        return "The extra body must be a JSON object.";
+                }
+                catch (System.Text.Json.JsonException error)
+                {
+                    return "The extra body isn't valid JSON: " + error.Message;
+                }
+            }
+            return null;
+        }
+
+        public BackendSettings ToSettings() => new()
+        {
+            Name = Name.Trim(),
+            Kind = Kind,
+            BaseUrl = BaseUrl.Trim(),
+            Model = Model.Trim(),
+            Priority = Priority,
+            Parallel = Math.Max(1, Parallel),
+            ContextWindow = Math.Max(1024, ContextWindow),
+            MaxTokens = Math.Max(16, MaxTokens),
+            Thinking = Thinking,
+            FirstByteTimeout = FirstByteTimeout is > 0 ? FirstByteTimeout : null,
+            StallTimeout = StallTimeout is > 0 ? StallTimeout : null,
+            Cooldown = Math.Max(0, Cooldown),
+            MaxCooldown = Math.Max(Cooldown, MaxCooldown),
+            Headers = Headers
+                .Split('\n')
+                .Where(line => line.Contains(':'))
+                .Select(line => line.Split(':', 2))
+                .GroupBy(parts => parts[0].Trim())
+                .ToDictionary(group => group.Key, group => group.Last()[1].Trim()),
+            ExtraBody = ExtraBody.Trim().Length > 0 ? JsonNode.Parse(ExtraBody)!.AsObject() : null,
+        };
+    }
+}
