@@ -53,7 +53,9 @@ public sealed class PrefixTests
     public async Task ToolsAreSortedByName()
     {
         await using var harness = await Harness.StartAsync(Operations());
-        var tools = harness.Services.GetRequiredService<ToolCatalog>().For(new RoleSettings());
+        var tools = await harness
+            .Services.GetRequiredService<ToolCatalog>()
+            .ForAsync(new RoleSettings());
         var names = tools.Definitions.Select(tool => tool.Name).ToList();
         Assert.Equal(names.Order(StringComparer.Ordinal), names);
         Assert.Equal(
@@ -84,7 +86,7 @@ public sealed class PrefixTests
     public sealed record SetMotdRequest(string Server, string Text, int? Seconds);
 
     [Fact]
-    public void SchemaComesFromTheRequestType()
+    public async Task SchemaAndDescriptionComeFromTheOperation()
     {
         var services = new ServiceCollection();
         services.AddQuasarOperation<SetMotdRequest, object>(
@@ -92,10 +94,14 @@ public sealed class PrefixTests
             "servers.motd.set",
             [QuasarPolicyNames.CanEditConfigs],
             (_, _, _) => Task.FromResult<object>(new { }),
-            null
+            new QuasarOperationMetadata { Description = "Sets the message of the day of a server." }
         );
         var operation = services.BuildServiceProvider().GetRequiredService<QuasarOperation>();
-        var tool = new ToolCatalog([operation]).For(new RoleSettings()).Definitions.Single();
+        await using var harness = await Harness.StartAsync([operation]);
+        var tool = (
+            await harness.Services.GetRequiredService<ToolCatalog>().ForAsync(new RoleSettings())
+        ).Definitions.Single();
+        Assert.StartsWith("Sets the message of the day of a server.\n", tool.Description);
         Assert.Equal("object", tool.Schema.GetProperty("type").GetString());
         var properties = tool.Schema.GetProperty("properties");
         Assert.True(properties.TryGetProperty("server", out _));
@@ -108,4 +114,17 @@ public sealed class PrefixTests
         kind == BackendKind.Anthropic
             ? body.GetProperty("system").GetRawText() + body.GetProperty("tools").GetRawText()
             : body.GetProperty("messages")[0].GetRawText() + body.GetProperty("tools").GetRawText();
+
+    [Fact]
+    public async Task OperationsCoreClosesToAgentsAreNotOffered()
+    {
+        await using var harness = await Harness.StartAsync(Operations());
+        var catalog = harness.Services.GetRequiredService<ToolCatalog>();
+        var role = new RoleSettings();
+        Assert.Contains("quasar_core__logs_read", (await catalog.ForAsync(role)).ByName.Keys);
+
+        // An RBAC change that closes the operation to agents takes effect on the next run.
+        harness.Dispatched.Unavailable.Add("quasar.core/logs.read");
+        Assert.DoesNotContain("quasar_core__logs_read", (await catalog.ForAsync(role)).ByName.Keys);
+    }
 }

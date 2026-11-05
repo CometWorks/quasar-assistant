@@ -2,6 +2,7 @@ using System.Security.Claims;
 using System.Text.Json;
 using Microsoft.AspNetCore.Authorization;
 using Quasar.Plugin.Abstractions.Operations;
+using Quasar.Plugin.Abstractions.Security;
 using QuasarAssistant.Llm;
 using QuasarAssistant.Settings;
 using QuasarAssistant.Storage;
@@ -12,7 +13,6 @@ namespace QuasarAssistant.Agent;
 /// Each outcome goes back to the conversation as a <c>[host]</c> line.</summary>
 public sealed class ProposalService(
     IQuasarAuditLog audit,
-    IProposalDecisions decisions,
     ProposalStore proposals,
     ConversationStore conversations,
     SettingsStore settings,
@@ -57,8 +57,9 @@ public sealed class ProposalService(
         return proposal;
     }
 
-    /// <summary>Whether the person could approve the operation, by its default policies. Core decides on approval,
-    /// with the admins' rule overrides; this only hides buttons that can't work.</summary>
+    /// <summary>Whether the person could approve or reject the operation, by its default policies. No person holds
+    /// CanActAsPlayer, so CanControlServers stands in for it, as in core. Core decides on approval with the
+    /// admins' rule overrides; this only hides buttons and notices that can't work.</summary>
     public async Task<bool> CanApproveAsync(
         ClaimsPrincipal user,
         IAuthorizationService authorization,
@@ -68,7 +69,20 @@ public sealed class ProposalService(
         if (!_operations.TryGetValue(proposal.Operation, out var operation))
             return false;
         foreach (var policy in operation.DefaultPolicies)
-            if (!(await authorization.AuthorizeAsync(user, null, policy)).Succeeded)
+            if (
+                !(
+                    await authorization.AuthorizeAsync(
+                        user,
+                        null,
+                        policy.Equals(
+                            QuasarPolicyNames.CanActAsPlayer,
+                            StringComparison.OrdinalIgnoreCase
+                        )
+                            ? QuasarPolicyNames.CanControlServers
+                            : policy
+                    )
+                ).Succeeded
+            )
                 return false;
         return true;
     }
@@ -84,8 +98,8 @@ public sealed class ProposalService(
             return "This proposal was already decided.";
         try
         {
-            var result = await decisions.ApproveAsync(approver, id, token);
-            if (result.StatusCode is 401 or 403 or 501)
+            var result = await audit.ApproveAsync(approver, id, token);
+            if (result.StatusCode is 401 or 403)
                 return result.Error ?? "Quasar refused the approval."; // Still pending: another admin may approve.
             var ok = result.Error is null;
             var outcome = ok
@@ -121,7 +135,10 @@ public sealed class ProposalService(
         try
         {
             reason = string.IsNullOrWhiteSpace(reason) ? "no reason given" : reason.Trim();
-            await decisions.RejectAsync(approver, id, reason, token);
+            var result = await audit.RejectAsync(approver, id, reason, token);
+            if (result.StatusCode is 401 or 403)
+                return result.Error ?? "Quasar refused the rejection.";
+            // 404 or 409: core has closed the proposal already, so the plugin closes its record too.
             Decide(
                 id,
                 approver,
@@ -149,7 +166,8 @@ public sealed class ProposalService(
                 continue;
             try
             {
-                await decisions.RejectAsync(null, proposal.Id, "expired", token);
+                // Core may have expired the entry itself; the plugin's record expires either way.
+                await audit.RejectAsync(null, proposal.Id, "expired", token);
                 Decide(
                     proposal.Id,
                     null,

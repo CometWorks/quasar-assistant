@@ -1,5 +1,8 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.Extensions.DependencyInjection;
+using Quasar.Plugin.Abstractions.Assistant;
 using Quasar.Plugin.Abstractions.Operations;
+using Quasar.Plugin.Abstractions.Security;
 using QuasarAssistant.Agent;
 using QuasarAssistant.Llm;
 using QuasarAssistant.Storage;
@@ -71,7 +74,7 @@ public sealed class ProposalTests
     {
         var (harness, _) = await ProposeAsync();
         await using var __ = harness;
-        harness.Decisions.Result = new QuasarOperationResult(
+        harness.Audit.ApproveResult = new QuasarOperationResult(
             403,
             Error: "The approver cannot access this SDK operation."
         );
@@ -111,7 +114,7 @@ public sealed class ProposalTests
             )
         );
         Assert.Contains("rejected by Grace: not now", conversation.Messages[^1].Text);
-        Assert.Equal(("entry1", "not now"), Assert.Single(harness.Decisions.Rejected));
+        Assert.Equal(("entry1", "not now", false), Assert.Single(harness.Audit.Rejected));
     }
 
     [Fact]
@@ -130,7 +133,60 @@ public sealed class ProposalTests
             ProposalStatus.Expired,
             harness.Services.GetRequiredService<ProposalStore>().Get("entry1")!.Status
         );
-        Assert.Equal(("entry1", "expired"), Assert.Single(harness.Decisions.Rejected));
+        Assert.Equal(("entry1", "expired", true), Assert.Single(harness.Audit.Rejected));
         Assert.Contains("expired after 30 days", conversation.Messages[^1].Text);
+    }
+
+    [Fact]
+    public async Task WebPushGoesToThoseWhoCouldApprove()
+    {
+        var (harness, _) = await ProposeAsync();
+        await using var _ = harness;
+        var notices = harness.Services.GetRequiredService<IQuasarNoticeSource>();
+
+        var admin = await notices.GetNoticesAsync(
+            Harness.Person("Grace", "steam:9", "admin"),
+            default
+        );
+        Assert.Equal("quasar.assistant/proposal/entry1", Assert.Single(admin).Key);
+        Assert.Equal("/assistant/approvals", admin[0].Url);
+        Assert.Empty(
+            await notices.GetNoticesAsync(Harness.Person("Vic", "steam:8", "guest"), default)
+        );
+
+        harness.Configure(settings => settings with { Notifications = new() { WebPush = false } });
+        Assert.Empty(
+            await notices.GetNoticesAsync(Harness.Person("Grace", "steam:9", "admin"), default)
+        );
+    }
+
+    [Fact]
+    public async Task PlayerProposalsNeedServerControlToApprove()
+    {
+        await using var harness = await Harness.StartAsync([]);
+        var service = harness.Services.GetRequiredService<ProposalService>();
+        var authorization = harness.Services.GetRequiredService<IAuthorizationService>();
+        var player = new Proposal
+        {
+            Id = "p",
+            ConversationId = "c",
+            AskerSubject = "steam:1",
+            PluginId = "quasar.core",
+            OperationId = "my.grid.restore",
+        };
+        // Unknown to this harness: nobody sees the buttons.
+        Assert.False(await service.CanApproveAsync(Harness.Person(), authorization, player));
+
+        await using var withOperation = await Harness.StartAsync([
+            new TestOperation("my.grid.restore", policies: [QuasarPolicyNames.CanActAsPlayer]),
+        ]);
+        service = withOperation.Services.GetRequiredService<ProposalService>();
+        authorization = withOperation.Services.GetRequiredService<IAuthorizationService>();
+        Assert.True(
+            await service.CanApproveAsync(Harness.Person(role: "editor"), authorization, player)
+        );
+        Assert.False(
+            await service.CanApproveAsync(Harness.Person(role: "viewer"), authorization, player)
+        );
     }
 }
