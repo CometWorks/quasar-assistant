@@ -1,0 +1,133 @@
+@using Quasar.Plugin.Abstractions.Operations
+
+@* One role's backends, limits, notes and modes; the page saves the form. *@
+<h3>Backends, in failover order</h3>
+<ol class="assistant-order">
+    @foreach (var (name, index) in Form.Backends.Select((name, index) => (name, index)))
+    {
+        <li>
+            <span>@name</span>
+            <button type="button" class="assistant-icon-button" title="Move up" aria-label="Move @name up" disabled="@(index == 0)" @onclick="() => Move(index, -1)"><AssistantIcon Icon="@AssistantIcons.Up" /></button>
+            <button type="button" class="assistant-icon-button" title="Move down" aria-label="Move @name down" disabled="@(index == Form.Backends.Count - 1)" @onclick="() => Move(index, 1)"><AssistantIcon Icon="@AssistantIcons.Down" /></button>
+            <button type="button" class="assistant-icon-button" title="Remove" aria-label="Remove @name" @onclick="() => Form.Backends.RemoveAt(index)"><AssistantIcon Icon="@AssistantIcons.Close" /></button>
+        </li>
+    }
+</ol>
+@{ var unused = AllBackends.Except(Form.Backends).ToList(); }
+@if (unused.Count > 0)
+{
+    <div class="assistant-row">
+        <select @bind="_addBackend" aria-label="Backend to add">
+            <option value="">Choose a backend</option>
+            @foreach (var name in unused)
+            {
+                <option value="@name">@name</option>
+            }
+        </select>
+        <button type="button" class="assistant-button" disabled="@string.IsNullOrEmpty(_addBackend)" @onclick="Add">Add</button>
+    </div>
+}
+
+<h3>Runs</h3>
+<div class="assistant-form">
+    <label>Runs at once <input type="number" min="1" max="32" @bind="Form.MaxConcurrentRuns" /></label>
+    <label>Queue wait (s) <input type="number" min="1" @bind="Form.QueueWaitSeconds" /></label>
+    <label>Run deadline (s) <input type="number" min="10" @bind="Form.RunDeadlineSeconds" /></label>
+    <label>Model turns per run <input type="number" min="1" max="200" @bind="Form.MaxTurns" /></label>
+</div>
+
+<h3>Notes for the assistant</h3>
+<p class="assistant-hint">Added to the system prompt. Every request sends it, so keep it short and stable. Longer text, such as a FAQ, goes in a skill.</p>
+<textarea class="assistant-wide" rows="4" maxlength="8000" @bind="Form.RoleText" aria-label="Notes for the @Label"></textarea>
+
+<h3>What the @Label may do</h3>
+<p class="assistant-hint">@ModesHint</p>
+<div class="assistant-table-wrap">
+    <table>
+        <thead><tr><th scope="col">Area</th><th scope="col">Mode</th></tr></thead>
+        <tbody>
+            @foreach (var area in Operations.Select(ToolCatalog.Area).Distinct().Order())
+            {
+                <tr>
+                    <th scope="row">@area</th>
+                    <td>
+                        <select value="@(Form.AreaModes.TryGetValue(area, out var mode) ? mode.ToString() : "")" aria-label="Mode for @area"
+                                @onchange="e => SetMode(Form.AreaModes, area, (string?)e.Value)">
+                            <option value="">Default (reads: read, changes: propose)</option>
+                            @foreach (var option in Enum.GetValues<ToolMode>())
+                            {
+                                <option value="@option">@option</option>
+                            }
+                        </select>
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+</div>
+<details>
+    <summary>Per operation</summary>
+    <div class="assistant-table-wrap">
+        <table>
+            <thead><tr><th scope="col">Operation</th><th scope="col">Kind</th><th scope="col">Mode</th><th scope="col">Effective</th></tr></thead>
+            <tbody>
+                @foreach (var operation in Operations)
+                {
+                    var effective = ToolCatalog.EffectiveMode(operation, Form.ToSettings());
+                    <tr>
+                        <th scope="row"><code>@operation.Key</code></th>
+                        <td>@(ToolCatalog.Effect(operation) == QuasarOperationEffect.Read ? "read" : "change")</td>
+                        <td>
+                            <select value="@(Form.OperationModes.TryGetValue(operation.Key, out var mode) ? mode.ToString() : "")" aria-label="Mode for @operation.Key"
+                                    @onchange="e => SetMode(Form.OperationModes, operation.Key, (string?)e.Value)">
+                                <option value="">Area's mode</option>
+                                @foreach (var option in Enum.GetValues<ToolMode>())
+                                {
+                                    <option value="@option">@option</option>
+                                }
+                            </select>
+                        </td>
+                        <td>@(ToolCatalog.IsOffered(operation, effective) ? effective.ToString() : "not offered")</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+</details>
+
+<McpEditor Role="@Role" Servers="Form.McpServers" />
+
+@code {
+    [Parameter, EditorRequired] public RoleForm Form { get; set; } = null!;
+    [Parameter, EditorRequired] public string Role { get; set; } = "";
+    [Parameter, EditorRequired] public IReadOnlyList<string> AllBackends { get; set; } = [];
+
+    /// <summary>The operations whose modes this role sets.</summary>
+    [Parameter, EditorRequired] public IReadOnlyList<QuasarOperation> Operations { get; set; } = [];
+
+    private string? _addBackend;
+
+    private string Label => Role == AssistantRoles.Player ? "player agent" : "assistant";
+
+    private string ModesHint => Role == AssistantRoles.Player
+        ? "Per tool: off hides it, read offers only reads, propose turns each change into a proposal an admin approves, apply runs it at once. A grid restore in apply runs at once only for the loss causes allowed below. The player only ever reaches their own things."
+        : "Per area of operations: off hides them, read offers only reads, propose turns each change into a proposal an admin approves, apply runs changes at once (on Discord changes are always proposals). Every call is still checked against the asker's own permissions. Operations Quasar closes to agents, by its deny list and the current access rules, aren't listed.";
+
+    private void Move(int index, int by) =>
+        (Form.Backends[index], Form.Backends[index + by]) = (Form.Backends[index + by], Form.Backends[index]);
+
+    private void Add()
+    {
+        if (!string.IsNullOrEmpty(_addBackend))
+            Form.Backends.Add(_addBackend);
+        _addBackend = null;
+    }
+
+    private static void SetMode(Dictionary<string, ToolMode> modes, string key, string? value)
+    {
+        if (Enum.TryParse<ToolMode>(value, out var mode))
+            modes[key] = mode;
+        else
+            modes.Remove(key);
+    }
+}

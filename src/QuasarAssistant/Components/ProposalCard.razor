@@ -8,11 +8,20 @@
     </header>
     @if (ShowAsker)
     {
-        <p>Asked by @Proposal.AskerName, @Proposal.Created.ToUniversalTime().ToString("yyyy-MM-dd HH:mm") UTC</p>
+        <p>Asked by @(Proposal.Role == AssistantRoles.Player ? "the player " : "")@Proposal.AskerName, @Proposal.Created.ToUniversalTime().ToString("yyyy-MM-dd HH:mm") UTC</p>
     }
     @if (!string.IsNullOrWhiteSpace(Proposal.Reason))
     {
         <p class="assistant-proposal-reason">@Proposal.Reason</p>
+    }
+    @if (Proposal.Details is { Count: > 0 } details)
+    {
+        <ul class="assistant-proposal-details">
+            @foreach (var line in details)
+            {
+                <li>@line</li>
+            }
+        </ul>
     }
     <pre>@Proposal.Arguments</pre>
     @if (Proposal.Outcome is { } outcome && Proposal.Status != ProposalStatus.Pending)

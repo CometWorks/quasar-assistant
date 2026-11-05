@@ -29,6 +29,11 @@
 .assistant-surface table { border-collapse: collapse; min-width: 100%; }
 .assistant-surface th, .assistant-surface td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--quasar-palette-table-lines, #2a3038); vertical-align: middle; }
 .assistant-order { padding-left: 20px; }
+.assistant-fieldset { border: 1px solid var(--quasar-palette-lines-default, #303740); border-radius: 6px; padding: 8px 12px; margin: 8px 0; }
+.assistant-fieldset legend { padding: 0 4px; }
+.assistant-checklist { list-style: none; padding: 0; margin: 6px 0; display: flex; flex-direction: column; gap: 4px; }
+.assistant-wide-field { display: flex; flex-direction: column; gap: 4px; margin: 8px 0; }
+.assistant-proposal-details { margin: 4px 0; padding-left: 18px; }
 .assistant-order li span { display: inline-block; min-width: 160px; }
 
 .assistant-launcher { position: fixed; right: 20px; bottom: 20px; z-index: 1200; width: 48px; height: 48px; border-radius: 50%; border: none; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; background: var(--quasar-palette-primary, #56c8dc); color: var(--quasar-palette-primary-contrast-text, #0b0d10); box-shadow: 0 4px 14px #0006; }

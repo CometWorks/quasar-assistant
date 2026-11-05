@@ -2,6 +2,7 @@
 @inject ConversationStore Conversations
 @inject AssistantRunner Runner
 @inject ProposalStore Proposals
+@inject SettingsStore Settings
 
 <div class="assistant-chat">
     <div class="assistant-messages" role="log" aria-live="polite" aria-label="Conversation">
@@ -29,7 +30,7 @@
                         }
                         break;
                     case ChatRole.Tool:
-                        @if (message.ProposalId is { } id && Proposals.Get(id) is { } proposal)
+                        @if (Settings.Current.Notifications.Cards && message.ProposalId is { } id && Proposals.Get(id) is { } proposal)
                         {
                             <ProposalCard Proposal="proposal" />
                         }

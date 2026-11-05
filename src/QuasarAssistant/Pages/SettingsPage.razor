@@ -18,7 +18,7 @@
 
     <section>
         <h2>Models</h2>
-        <p class="assistant-hint">Each backend is one model at one provider. The admin assistant tries its backends in the order below and moves to the next one when a backend fails, as Clangy does.</p>
+        <p class="assistant-hint">Each backend is one model at one provider. Each role tries its own backends in its order and moves to the next one when a backend fails, as Clangy does.</p>
         <div class="assistant-table-wrap">
             <table>
                 <thead><tr><th scope="col">Name</th><th scope="col">Kind</th><th scope="col">Model</th><th scope="col">API key</th><th scope="col">Test</th><th scope="col"><span class="assistant-visually-hidden">Actions</span></th></tr></thead>
@@ -99,111 +99,74 @@
 
     <section>
         <h2>Admin assistant</h2>
-        <h3>Backends, in failover order</h3>
-        <ol class="assistant-order">
-            @foreach (var (name, index) in _role.Backends.Select((name, index) => (name, index)))
-            {
-                <li>
-                    <span>@name</span>
-                    <button type="button" class="assistant-icon-button" title="Move up" aria-label="Move @name up" disabled="@(index == 0)" @onclick="() => Move(index, -1)"><AssistantIcon Icon="@AssistantIcons.Up" /></button>
-                    <button type="button" class="assistant-icon-button" title="Move down" aria-label="Move @name down" disabled="@(index == _role.Backends.Count - 1)" @onclick="() => Move(index, 1)"><AssistantIcon Icon="@AssistantIcons.Down" /></button>
-                    <button type="button" class="assistant-icon-button" title="Remove" aria-label="Remove @name" @onclick="() => _role.Backends.RemoveAt(index)"><AssistantIcon Icon="@AssistantIcons.Close" /></button>
-                </li>
-            }
-        </ol>
-        @{ var unused = _settings.Backends.Select(b => b.Name).Except(_role.Backends).ToList(); }
-        @if (unused.Count > 0)
-        {
-            <div class="assistant-row">
-                <select @bind="_addBackend" aria-label="Backend to add">
-                    <option value="">Choose a backend</option>
-                    @foreach (var name in unused)
-                    {
-                        <option value="@name">@name</option>
-                    }
-                </select>
-                <button type="button" class="assistant-button" disabled="@string.IsNullOrEmpty(_addBackend)" @onclick="AddToRole">Add</button>
-            </div>
-        }
-
-        <h3>Limits</h3>
-        <div class="assistant-form">
-            <label>Runs at once <input type="number" min="1" max="32" @bind="_role.MaxConcurrentRuns" /></label>
-            <label>Queue wait (s) <input type="number" min="1" @bind="_role.QueueWaitSeconds" /></label>
-            <label>Run deadline (s) <input type="number" min="10" @bind="_role.RunDeadlineSeconds" /></label>
-            <label>Model turns per run <input type="number" min="1" max="200" @bind="_role.MaxTurns" /></label>
-        </div>
-
-        <h3>Notes for the assistant</h3>
-        <p class="assistant-hint">Added to the system prompt, for example what your servers are for. Every request sends it, so keep it short and stable.</p>
-        <textarea class="assistant-wide" rows="4" maxlength="8000" @bind="_role.RoleText" aria-label="Notes for the assistant"></textarea>
-
-        <h3>What the assistant may do</h3>
-        <p class="assistant-hint">Per area of operations: <strong>off</strong> hides them, <strong>read</strong> offers only reads, <strong>propose</strong> turns each change into a proposal an admin approves, <strong>apply</strong> runs changes at once. Every call is still checked against the asker's own permissions. Operations Quasar closes to agents, by its deny list and the current access rules, aren't listed.</p>
-        <div class="assistant-table-wrap">
-            <table>
-                <thead><tr><th scope="col">Area</th><th scope="col">Mode</th></tr></thead>
-                <tbody>
-                    @foreach (var area in _operations.Select(ToolCatalog.Area).Distinct().Order())
-                    {
-                        <tr>
-                            <th scope="row">@area</th>
-                            <td>
-                                <select value="@(_role.AreaModes.TryGetValue(area, out var mode) ? mode.ToString() : "")" aria-label="Mode for @area"
-                                        @onchange="e => SetMode(_role.AreaModes, area, (string?)e.Value)">
-                                    <option value="">Default (reads: read, changes: propose)</option>
-                                    @foreach (var option in Enum.GetValues<ToolMode>())
-                                    {
-                                        <option value="@option">@option</option>
-                                    }
-                                </select>
-                            </td>
-                        </tr>
-                    }
-                </tbody>
-            </table>
-        </div>
-        <details>
-            <summary>Per operation</summary>
-            <div class="assistant-table-wrap">
-                <table>
-                    <thead><tr><th scope="col">Operation</th><th scope="col">Kind</th><th scope="col">Mode</th><th scope="col">Effective</th></tr></thead>
-                    <tbody>
-                        @foreach (var operation in _operations)
-                        {
-                            <tr>
-                                <th scope="row"><code>@operation.Key</code></th>
-                                <td>@(ToolCatalog.Effect(operation) == Quasar.Plugin.Abstractions.Operations.QuasarOperationEffect.Read ? "read" : "change")</td>
-                                <td>
-                                    <select value="@(_role.OperationModes.TryGetValue(operation.Key, out var mode) ? mode.ToString() : "")" aria-label="Mode for @operation.Key"
-                                            @onchange="e => SetMode(_role.OperationModes, operation.Key, (string?)e.Value)">
-                                        <option value="">Area's mode</option>
-                                        @foreach (var option in Enum.GetValues<ToolMode>())
-                                        {
-                                            <option value="@option">@option</option>
-                                        }
-                                    </select>
-                                </td>
-                                <td>@(ToolCatalog.IsOffered(operation, ToolCatalog.EffectiveMode(operation, _role.ToSettings())) ? ToolCatalog.EffectiveMode(operation, _role.ToSettings()).ToString() : "not offered")</td>
-                            </tr>
-                        }
-                    </tbody>
-                </table>
-            </div>
-        </details>
+        <p class="assistant-hint">Admins chat with it in the web UI and with <code>/assistant</code> in the admin Discord channel.</p>
+        <RoleEditor Form="_admin" Role="@AssistantRoles.Admin" AllBackends="BackendNames" Operations="ToolCatalog.OfRole(_operations, AssistantRoles.Admin).ToList()" />
+        <SkillsEditor Role="@AssistantRoles.Admin" />
+        <button type="button" class="assistant-button assistant-button-primary" @onclick="() => SaveRole(AssistantRoles.Admin, _admin)">Save the admin assistant</button>
     </section>
 
     <section>
+        <h2>Player support</h2>
+        <p class="assistant-hint">Players ask with <code>!ask</code> in game and <code>/ask</code> on Discord. The player agent only ever reaches the asking player's own grids and the server's public information.</p>
+        <div class="assistant-form">
+            <label class="assistant-check"><input type="checkbox" @bind="_player.Enabled" /> Answer players</label>
+            <label>Requests per player an hour <input type="number" min="0" @bind="_player.RequestsPerHour" /></label>
+            <label>Requests per player a day <input type="number" min="0" @bind="_player.RequestsPerDay" /></label>
+            <label>Actions per player a day (changes and hand-overs; restores have their own limits) <input type="number" min="0" @bind="_player.ActionsPerDay" /></label>
+            <label class="assistant-check"><input type="checkbox" @bind="_player.QuasarBook" /> Let players' questions read the Quasar book (the admins' handbook)</label>
+        </div>
+        <label class="assistant-wide-field">Privacy notice, sent on a player's first question and once a month
+            <textarea class="assistant-wide" rows="2" maxlength="1000" @bind="_player.PrivacyNotice" placeholder="@PlayerRequestHandler.PrivacyNotice(Store.Current with { Player = Store.Current.Player with { PrivacyNotice = "" } })"></textarea>
+        </label>
+
+        <h3>Grid restores</h3>
+        <p class="assistant-hint">The player names the grid; these rules decide the rest. In apply mode a restore runs at once for the causes ticked here; any other cause, a missing loss record or no free spot makes it a proposal. An undo gives the restore back to the player's quota.</p>
+        <div class="assistant-form">
+            <label>Placement
+                <select @bind="_player.Placement">
+                    <option value="@RestorePlacements.Original">The original position, else a free spot nearby</option>
+                    <option value="@RestorePlacements.NearPlayer">Near the player</option>
+                    <option value="@RestorePlacements.NearPlayerStation">Near the player, as a station</option>
+                </select>
+            </label>
+            <label>Distance from other players' grids (m) <input type="number" min="0" step="any" @bind="_player.ForeignExclusionMeters" /></label>
+            <label>Search for a free spot up to (m) <input type="number" min="0" step="any" @bind="_player.MaxSearchMeters" /></label>
+            <label class="assistant-check"><input type="checkbox" @bind="_player.EmptyInventories" /> Empty inventories and production queues</label>
+            <label>Restores per player in 24 hours (empty: no limit) <input type="number" min="0" @bind="_player.PerDay" /></label>
+            <label>In 7 days <input type="number" min="0" @bind="_player.PerWeek" /></label>
+            <label>In 30 days <input type="number" min="0" @bind="_player.PerMonth" /></label>
+        </div>
+        <fieldset class="assistant-fieldset">
+            <legend>Loss causes restored without an admin</legend>
+            @foreach (var cause in RestoreRules.Causes)
+            {
+                <label class="assistant-check"><input type="checkbox" checked="@_player.AllowedCauses.Contains(cause)" @onchange="e => Toggle(_player.AllowedCauses, cause, e.Value is true)" /> @cause</label>
+            }
+        </fieldset>
+
+        <RoleEditor Form="_playerRole" Role="@AssistantRoles.Player" AllBackends="BackendNames" Operations="ToolCatalog.OfRole(_operations, AssistantRoles.Player).ToList()" />
+        <SkillsEditor Role="@AssistantRoles.Player" />
+        <button type="button" class="assistant-button assistant-button-primary" @onclick="SavePlayer">Save player support</button>
+    </section>
+
+    <section>
+        <h2>Notifications and Discord</h2>
+        <div class="assistant-form">
+            <label class="assistant-check"><input type="checkbox" @bind="_general.Cards" /> Proposal cards in the conversation (the Approvals page is always there)</label>
+            <label class="assistant-check"><input type="checkbox" @bind="_general.WebPush" /> Web push to the admins who could approve a proposal or take a hand-over</label>
+            <label class="assistant-check"><input type="checkbox" @bind="_general.Discord" /> Post proposals and hand-overs in the admin Discord channel</label>
+            <label>Admin Discord channel ID <input inputmode="numeric" @bind="_general.AdminChannelId" placeholder="123456789012345678" /></label>
+            <label>Quasar's public URL, for links in posts <input type="url" @bind="_general.PublicUrl" placeholder="https://quasar.example.com" /></label>
+        </div>
+        <p class="assistant-hint"><code>/assistant</code> answers only in the admin channel, for Discord users mapped to a Quasar account, and there it can only propose changes.</p>
+
         <h2>General</h2>
         <div class="assistant-form">
             <label>Tool result limit (bytes) <input type="number" min="1024" max="1048576" @bind="_general.ResultCapBytes" /></label>
             <label>Delete conversations after (days) <input type="number" min="1" @bind="_general.ConversationRetentionDays" /></label>
-            <label>Proposals expire after (days) <input type="number" min="1" @bind="_general.ProposalExpiryDays" /></label>
-            <label class="assistant-check"><input type="checkbox" @bind="_general.WebPush" /> Web push to the admins who could approve a proposal</label>
-            <label class="assistant-check"><input type="checkbox" @bind="_general.Discord" /> Post proposals in the admin Discord channel (not available yet)</label>
+            <label>Proposals and hand-overs expire after (days) <input type="number" min="1" @bind="_general.ProposalExpiryDays" /></label>
         </div>
-        <p class="assistant-hint">Proposal cards in the conversation and the Approvals page are always on.</p>
-        <button type="button" class="assistant-button assistant-button-primary" @onclick="SaveRole">Save the assistant settings</button>
+        <button type="button" class="assistant-button assistant-button-primary" @onclick="SaveGeneral">Save notifications and general settings</button>
     </section>
 
     <section>
@@ -242,10 +205,11 @@
 
 @code {
     private AssistantSettings _settings = new();
-    private RoleForm _role = new();
+    private RoleForm _admin = new();
+    private RoleForm _playerRole = new();
+    private PlayerForm _player = new();
     private GeneralForm _general = new();
     private BackendForm? _form;
-    private string? _addBackend;
     private string? _message;
     private bool _failed;
     private string? _testing;
@@ -262,9 +226,13 @@
     private void Load()
     {
         _settings = Store.Current;
-        _role = RoleForm.From(_settings.Role(AssistantRoles.Admin));
+        _admin = RoleForm.From(_settings.Role(AssistantRoles.Admin));
+        _playerRole = RoleForm.From(_settings.Role(AssistantRoles.Player));
+        _player = PlayerForm.From(_settings.Player);
         _general = GeneralForm.From(_settings);
     }
+
+    private IReadOnlyList<string> BackendNames => _settings.Backends.Select(b => b.Name).ToList();
 
     private void Edit(BackendSettings? backend) => _form = BackendForm.From(backend);
 
@@ -306,33 +274,57 @@
         Say($"Deleted {backend.Name}.");
     }
 
-    private void Move(int index, int by)
+    private static void Toggle(HashSet<string> set, string value, bool on)
     {
-        (_role.Backends[index], _role.Backends[index + by]) = (_role.Backends[index + by], _role.Backends[index]);
-    }
-
-    private void AddToRole()
-    {
-        if (!string.IsNullOrEmpty(_addBackend))
-            _role.Backends.Add(_addBackend);
-        _addBackend = null;
-    }
-
-    private static void SetMode(Dictionary<string, ToolMode> modes, string key, string? value)
-    {
-        if (Enum.TryParse<ToolMode>(value, out var mode))
-            modes[key] = mode;
+        if (on)
+            set.Add(value);
         else
-            modes.Remove(key);
+            set.Remove(value);
     }
 
-    private void SaveRole()
+    private bool SaveRole(string name, RoleForm form)
     {
-        var current = Store.Current;
-        var roles = new Dictionary<string, RoleSettings>(current.Roles) { [AssistantRoles.Admin] = _role.ToSettings() };
-        Store.Save(_general.Apply(current) with { Roles = roles });
+        if (form.Validate() is { } problem)
+        {
+            Say(problem, failed: true);
+            return false;
+        }
+        // Header values are write-only: carry them over a rename, then apply what was typed.
+        var carried = form.McpServers
+            .Where(server => server.Original is not null && server.Original != server.Name.Trim() && !server.RemoveHeaders && server.Headers.Trim().Length == 0)
+            .ToDictionary(server => server.Name.Trim(), server => Store.McpHeaders(name, server.Original!));
+        Store.Save(Store.Current.WithRole(name, form.ToSettings()));
+        foreach (var server in form.McpServers)
+        {
+            var serverName = server.Name.Trim();
+            if (server.RemoveHeaders)
+                Store.SetMcpHeaders(name, serverName, new Dictionary<string, string>());
+            else if (server.Headers.Trim().Length > 0)
+                Store.SetMcpHeaders(name, serverName, server.ParsedHeaders());
+            else if (carried.TryGetValue(serverName, out var headers))
+                Store.SetMcpHeaders(name, serverName, headers);
+        }
         Load();
-        Say("Saved the assistant settings.");
+        Say(name == AssistantRoles.Player ? "Saved player support." : "Saved the admin assistant.");
+        return true;
+    }
+
+    private void SavePlayer()
+    {
+        if (_playerRole.Validate() is { } problem)
+        {
+            Say(problem, failed: true);
+            return;
+        }
+        Store.Save(Store.Current with { Player = _player.ToSettings() });
+        SaveRole(AssistantRoles.Player, _playerRole);
+    }
+
+    private void SaveGeneral()
+    {
+        Store.Save(_general.Apply(Store.Current));
+        Load();
+        Say("Saved the notifications and general settings.");
     }
 
     // A real one-line completion, outside the failover, so a test never cools a backend down.
@@ -372,57 +364,27 @@
         _failed = failed;
     }
 
-    private sealed class RoleForm
-    {
-        public List<string> Backends { get; set; } = [];
-        public string RoleText { get; set; } = "";
-        public Dictionary<string, ToolMode> AreaModes { get; set; } = [];
-        public Dictionary<string, ToolMode> OperationModes { get; set; } = [];
-        public int MaxConcurrentRuns { get; set; }
-        public int QueueWaitSeconds { get; set; }
-        public int RunDeadlineSeconds { get; set; }
-        public int MaxTurns { get; set; }
-
-        public static RoleForm From(RoleSettings role) => new()
-        {
-            Backends = [.. role.Backends],
-            RoleText = role.RoleText,
-            AreaModes = new(role.AreaModes),
-            OperationModes = new(role.OperationModes),
-            MaxConcurrentRuns = role.MaxConcurrentRuns,
-            QueueWaitSeconds = role.QueueWaitSeconds,
-            RunDeadlineSeconds = role.RunDeadlineSeconds,
-            MaxTurns = role.MaxTurns,
-        };
-
-        public RoleSettings ToSettings() => new()
-        {
-            Backends = [.. Backends],
-            RoleText = RoleText.Trim(),
-            AreaModes = new(AreaModes),
-            OperationModes = new(OperationModes),
-            MaxConcurrentRuns = Math.Max(1, MaxConcurrentRuns),
-            QueueWaitSeconds = Math.Max(1, QueueWaitSeconds),
-            RunDeadlineSeconds = Math.Max(10, RunDeadlineSeconds),
-            MaxTurns = Math.Max(1, MaxTurns),
-        };
-    }
-
     private sealed class GeneralForm
     {
         public int ResultCapBytes { get; set; }
         public int ConversationRetentionDays { get; set; }
         public int ProposalExpiryDays { get; set; }
+        public bool Cards { get; set; }
         public bool WebPush { get; set; }
         public bool Discord { get; set; }
+        public string AdminChannelId { get; set; } = "";
+        public string PublicUrl { get; set; } = "";
 
         public static GeneralForm From(AssistantSettings settings) => new()
         {
             ResultCapBytes = settings.ResultCapBytes,
             ConversationRetentionDays = settings.ConversationRetentionDays,
             ProposalExpiryDays = settings.ProposalExpiryDays,
+            Cards = settings.Notifications.Cards,
             WebPush = settings.Notifications.WebPush,
             Discord = settings.Notifications.Discord,
+            AdminChannelId = settings.Discord.AdminChannelId,
+            PublicUrl = settings.Discord.PublicUrl,
         };
 
         public AssistantSettings Apply(AssistantSettings settings) => settings with
@@ -430,7 +392,8 @@
             ResultCapBytes = Math.Clamp(ResultCapBytes, 1024, 1024 * 1024),
             ConversationRetentionDays = Math.Max(1, ConversationRetentionDays),
             ProposalExpiryDays = Math.Max(1, ProposalExpiryDays),
-            Notifications = new() { WebPush = WebPush, Discord = Discord },
+            Notifications = new() { Cards = Cards, WebPush = WebPush, Discord = Discord },
+            Discord = new() { AdminChannelId = AdminChannelId.Trim(), PublicUrl = PublicUrl.Trim() },
         };
     }
 

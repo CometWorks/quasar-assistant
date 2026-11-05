@@ -1,0 +1,79 @@
+@using QuasarAssistant.Skills
+@inject SkillLibrary Skills
+
+@* The admins' Markdown skills of one role, saved at once to skills/<role>/ in the data folder. *@
+<h3>Skills</h3>
+<p class="assistant-hint">@Hint</p>
+<ul class="assistant-checklist">
+    @foreach (var skill in Skills.Skills(Role))
+    {
+        <li>
+            <button type="button" class="assistant-button" @onclick="() => Edit(skill)"><code>@skill.Name</code></button>
+            <span class="assistant-hint">@skill.Summary</span>
+        </li>
+    }
+</ul>
+@if (_name is null)
+{
+    <button type="button" class="assistant-button" @onclick="() => Edit(null)"><AssistantIcon Icon="@AssistantIcons.Add" />Add a skill</button>
+}
+else
+{
+    <form class="assistant-form" @onsubmit="Save">
+        <label>Name (letters, digits, - and _) <input required maxlength="64" readonly="@(_original is not null)" @bind="_name" /></label>
+        <label class="assistant-wide-field">Markdown; the first line is its summary in the list
+            <textarea class="assistant-wide" rows="14" maxlength="200000" @bind="_text"></textarea>
+        </label>
+        <div class="assistant-row">
+            <button type="submit" class="assistant-button assistant-button-primary">Save skill</button>
+            <button type="button" class="assistant-button" @onclick="() => _name = null">Cancel</button>
+            @if (_original is not null)
+            {
+                <button type="button" class="assistant-button" @onclick="Delete"><AssistantIcon Icon="@AssistantIcons.Delete" />Delete</button>
+            }
+        </div>
+        @if (_error is not null)
+        {
+            <p class="assistant-error" role="alert">@_error</p>
+        }
+    </form>
+}
+
+@code {
+    [Parameter, EditorRequired] public string Role { get; set; } = "";
+
+    private string? _original;
+    private string? _name;
+    private string _text = "";
+    private string? _error;
+
+    private string Hint => Role == AssistantRoles.Player
+        ? "Text the player agent finds with its search and reads on demand, such as the server's FAQ and rules. Nothing here runs, and none of it is in the prompt until the agent reads it."
+        : "Text the assistant finds with its search and reads on demand, next to the built-in Quasar book (Quasar " + SkillLibrary.BookCommit[..Math.Min(7, SkillLibrary.BookCommit.Length)] + "). Nothing here runs.";
+
+    private void Edit(SkillPage? skill)
+    {
+        _original = skill?.Name;
+        _name = skill?.Name ?? "";
+        _text = skill?.Text ?? "";
+        _error = null;
+    }
+
+    private void Save()
+    {
+        if (_name is null || !SkillLibrary.IsValidName(_name.Trim()))
+        {
+            _error = "A skill name is 1 to 64 letters, digits, - or _.";
+            return;
+        }
+        Skills.Save(Role, _name.Trim(), _text);
+        _name = null;
+    }
+
+    private void Delete()
+    {
+        if (_original is not null)
+            Skills.Delete(Role, _original);
+        _name = null;
+    }
+}

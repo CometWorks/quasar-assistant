@@ -1,0 +1,41 @@
+@inject HandoverStore Handovers
+@inject IAuthorizationService Authorization
+@inject TimeProvider Time
+
+<article class="assistant-proposal @(Handover.Handled ? "assistant-proposal-approved" : "")" aria-label="Hand-over @Handover.Id">
+    <header>
+        <strong>@Handover.PlayerName needs an admin</strong>
+        <span class="assistant-proposal-status">@(Handover.Handled ? $"Handled by {Handover.HandledBy}" : "Waiting")</span>
+    </header>
+    <p>@Handover.PlayerKey, @Handover.Source, @Handover.Created.ToUniversalTime().ToString("yyyy-MM-dd HH:mm") UTC</p>
+    <p class="assistant-proposal-reason">@Handover.Reason</p>
+    @if (Handover.Excerpt.Length > 0)
+    {
+        <details>
+            <summary>Recent messages</summary>
+            <pre>@Handover.Excerpt</pre>
+        </details>
+    }
+    @if (!Handover.Handled && _canHandle)
+    {
+        <p class="assistant-hint">Answer the player in game or on Discord, then mark it handled.</p>
+        <button type="button" class="assistant-button assistant-button-primary" @onclick="MarkHandled">Mark handled</button>
+    }
+</article>
+
+@code {
+    [CascadingParameter] private Task<AuthenticationState> Authentication { get; set; } = null!;
+    [Parameter, EditorRequired] public Handover Handover { get; set; } = null!;
+
+    private ClaimsPrincipal _user = new();
+    private bool _canHandle;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _user = (await Authentication).User;
+        _canHandle = (await Authorization.AuthorizeAsync(_user, null, QuasarPolicyNames.CanControlServers)).Succeeded;
+    }
+
+    private void MarkHandled() =>
+        Handovers.MarkHandled(Handover.Id, _user.Identity?.Name ?? "an admin", Time.GetUtcNow());
+}
