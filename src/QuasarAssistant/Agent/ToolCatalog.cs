@@ -7,6 +7,7 @@ using System.Text.Json.Schema;
 using System.Text.Json.Serialization.Metadata;
 using System.Text.RegularExpressions;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Quasar.Plugin.Abstractions.Operations;
 using QuasarAssistant.Llm;
 using QuasarAssistant.Settings;
@@ -31,12 +32,20 @@ public sealed record ToolSet(
 /// </summary>
 public sealed partial class ToolCatalog(
     IEnumerable<QuasarOperation> operations,
-    IServiceScopeFactory scopes
+    IServiceScopeFactory scopes,
+    ILogger<ToolCatalog> logger
 )
 {
     private static readonly JsonSerializerOptions SchemaOptions = new(JsonSerializerDefaults.Web)
     {
-        TypeInfoResolver = new DefaultJsonTypeInfoResolver(),
+        TypeInfoResolver = new DefaultJsonTypeInfoResolver { Modifiers = { SkipStructDefaults } },
+    };
+    private static readonly JsonSchemaExporterOptions ExporterOptions = new()
+    {
+        TreatNullObliviousAsNonNullable = true,
+        // Any JSON value, such as a JsonElement's: the APIs want an empty schema rather than true.
+        TransformSchemaNode = (_, schema) =>
+            schema.GetValueKind() == JsonValueKind.True ? new JsonObject() : schema,
     };
     private readonly IReadOnlyList<QuasarOperation> _operations = operations
         .Where(op => op.Kind is QuasarOperationKind.Json or QuasarOperationKind.Read)
@@ -91,24 +100,43 @@ public sealed partial class ToolCatalog(
     private static QuasarOperationMetadata Resolved(QuasarOperation operation) =>
         operation.Metadata.ResolveFor(operation.Kind, operation.OperationId);
 
-    private static ToolSet Build(RoleSettings role, IReadOnlyList<QuasarOperation> available)
+    private ToolSet Build(RoleSettings role, IReadOnlyList<QuasarOperation> available)
     {
         Dictionary<string, AgentTool> tools = [];
+        List<ToolDefinition> definitions = [];
         foreach (var operation in available)
         {
             var mode = EffectiveMode(operation, role);
-            if (!IsOffered(operation, mode))
+            if (!IsOffered(operation, mode) || SchemaOrNull(operation) is not { } schema)
                 continue;
             var name = ToolName(operation);
             while (tools.ContainsKey(name))
                 name = Shorten(name + "_", name);
-            tools[name] = new AgentTool(name, operation, mode);
+            var tool = tools[name] = new AgentTool(name, operation, mode);
+            definitions.Add(new ToolDefinition(name, Describe(tool), schema));
         }
-        var definitions = tools
-            .Values.OrderBy(tool => tool.Name, StringComparer.Ordinal)
-            .Select(tool => new ToolDefinition(tool.Name, Describe(tool), Schema(tool.Operation)))
-            .ToList();
-        return new ToolSet(definitions, tools);
+        return new ToolSet(
+            definitions.OrderBy(tool => tool.Name, StringComparer.Ordinal).ToList(),
+            tools
+        );
+    }
+
+    /// <summary>One plugin's odd request type must not take the other tools down with it.</summary>
+    private JsonElement? SchemaOrNull(QuasarOperation operation)
+    {
+        try
+        {
+            return Schema(operation);
+        }
+        catch (Exception e)
+        {
+            logger.LogWarning(
+                e,
+                "The assistant leaves out {Operation}: its request schema can't be exported",
+                operation.Key
+            );
+            return null;
+        }
     }
 
     /// <summary><c>pluginId/operationId</c> as <c>[a-zA-Z0-9_-]{1,64}</c>; the tool set maps it back.</summary>
@@ -151,11 +179,7 @@ public sealed partial class ToolCatalog(
         var type = operation.RequestType;
         JsonNode? schema = type is null
             ? null
-            : JsonSchemaExporter.GetJsonSchemaAsNode(
-                SchemaOptions,
-                type,
-                new JsonSchemaExporterOptions { TreatNullObliviousAsNonNullable = true }
-            );
+            : JsonSchemaExporter.GetJsonSchemaAsNode(SchemaOptions, type, ExporterOptions);
         if (schema is not JsonObject root || !IsObjectType(root["type"]))
             root = new JsonObject { ["type"] = "object" };
         root["type"] = "object"; // Both APIs want a plain object at the root, never ["object", "null"].
@@ -166,6 +190,25 @@ public sealed partial class ToolCatalog(
         type is JsonValue value
             ? value.GetValue<string>() == "object"
             : type is JsonArray array && array.Any(item => item?.GetValue<string>() == "object");
+
+    /// <summary>
+    /// The exporter writes a constructor parameter's default into the schema, but a struct parameter's
+    /// <c>= default</c> reads back as null, which it can't serialize (core's <c>JsonElement Value = default</c>).
+    /// Such a type is described without its constructor: no defaults, the parameters without one still required.
+    /// </summary>
+    private static void SkipStructDefaults(JsonTypeInfo info)
+    {
+        if (info.Kind != JsonTypeInfoKind.Object || !info.Properties.Any(HasStructDefault))
+            return;
+        foreach (var property in info.Properties)
+            property.IsRequired = property.AssociatedParameter is { HasDefaultValue: false };
+        info.CreateObject = () => RuntimeHelpers.GetUninitializedObject(info.Type);
+    }
+
+    private static bool HasStructDefault(JsonPropertyInfo property) =>
+        property.AssociatedParameter is { HasDefaultValue: true, DefaultValue: null }
+        && property.PropertyType.IsValueType
+        && Nullable.GetUnderlyingType(property.PropertyType) is null;
 
     [GeneratedRegex("[^a-zA-Z0-9_-]")]
     private static partial Regex NotAllowed();

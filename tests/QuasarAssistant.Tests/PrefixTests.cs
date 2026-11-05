@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Microsoft.Extensions.DependencyInjection;
 using Quasar.Plugin.Abstractions.Operations;
 using Quasar.Plugin.Abstractions.Security;
@@ -107,6 +108,76 @@ public sealed class PrefixTests
         Assert.True(properties.TryGetProperty("server", out _));
         Assert.True(properties.TryGetProperty("text", out _));
         Assert.Contains("proposal", tool.Description);
+    }
+
+    // Like core's config.settings.set: the value can be any JSON.
+    public sealed record SetValueRequest(
+        string Server,
+        string Option = "",
+        JsonElement Value = default
+    );
+
+    [Fact]
+    public async Task DefaultedJsonElementTakesAnyValue()
+    {
+        await using var harness = await Harness.StartAsync([Typed<SetValueRequest>("value.set")]);
+        var tool = (
+            await harness.Services.GetRequiredService<ToolCatalog>().ForAsync(new RoleSettings())
+        ).Definitions.Single();
+        var properties = tool.Schema.GetProperty("properties");
+        Assert.Equal("{}", properties.GetProperty("value").GetRawText());
+        Assert.Equal("string", properties.GetProperty("option").GetProperty("type").GetString());
+        Assert.Equal("""["server"]""", tool.Schema.GetProperty("required").GetRawText());
+    }
+
+    public sealed class ThrowingConverter : JsonConverter<Odd>
+    {
+        public override bool HandleNull => true;
+
+        public override Odd Read(
+            ref Utf8JsonReader reader,
+            Type typeToConvert,
+            JsonSerializerOptions options
+        ) => throw new JsonException("No.");
+
+        public override void Write(
+            Utf8JsonWriter writer,
+            Odd value,
+            JsonSerializerOptions options
+        ) => throw new JsonException("No.");
+    }
+
+    [JsonConverter(typeof(ThrowingConverter))]
+    public sealed class Odd;
+
+    // The exporter writes the default with the converter, which throws.
+    public sealed record OddRequest(Odd? Odd = null);
+
+    [Fact]
+    public async Task AnOperationWhoseSchemaFailsIsLeftOutAlone()
+    {
+        await using var harness = await Harness.StartAsync([
+            Typed<OddRequest>("odd.set"),
+            Typed<SetValueRequest>("value.set"),
+        ]);
+        var names = (
+            await harness.Services.GetRequiredService<ToolCatalog>().ForAsync(new RoleSettings())
+        )
+            .ByName
+            .Keys;
+        Assert.Equal(["quasar_core__value_set"], names);
+    }
+
+    private static QuasarOperation Typed<TRequest>(string operationId)
+    {
+        var services = new ServiceCollection();
+        services.AddQuasarOperation<TRequest, object>(
+            "quasar.core",
+            operationId,
+            [QuasarPolicyNames.CanEditConfigs],
+            (_, _, _) => Task.FromResult<object>(new { })
+        );
+        return services.BuildServiceProvider().GetRequiredService<QuasarOperation>();
     }
 
     // The part of the request a provider caches: the system prompt and the tools.
