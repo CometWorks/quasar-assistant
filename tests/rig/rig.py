@@ -774,7 +774,25 @@ def scenario(chat: Chat, ui: UI) -> None:
         if entry["principal"]["kind"] != "player-agent":
             raise Fail(f"audit principal {entry['principal']}")
         (RUN / "step2-entry.json").write_text(json.dumps(entry, indent=2))
-        return f"grid {LOSS_SHIP.entity_id} back, audit {entry['id']} applied ok; whisper: {lines[-1][:80]!r}"
+        # Asked again with the grid back, Grid Backups refuses: nothing changes, and
+        # the audit log keeps it as refused with the reason and the server
+        before = len(restores())
+        again = chat.ask("restore my ship", "Restore result: Refused")
+        refused = wait(
+            lambda: restores(LOSS_SHIP.entity_id)[before:],
+            15,
+            "the refusal's audit entry",
+        )[-1]
+        if refused["result"] != "refused":
+            raise Fail(f"a refused restore audited as {refused['result']}: {refused!r}")
+        if refused.get("server") != SERVER_NAME:
+            raise Fail(f"the refused restore's server is {refused.get('server')!r}")
+        if not refused.get("error"):
+            raise Fail(f"the refused restore has no reason: {refused!r}")
+        return (
+            f"grid {LOSS_SHIP.entity_id} back, audit {entry['id']} applied ok; whisper: {lines[-1][:80]!r}; "
+            f"asked again: refused on {refused['server']} ({refused['error'][:80]!r}), whisper {again[-1][:60]!r}"
+        )
 
     @step(7, "injection in a grid name", needs=(2,))
     def _():
@@ -900,6 +918,19 @@ def scenario(chat: Chat, ui: UI) -> None:
         wait(
             lambda: not grid_present(LOSS_SHIP.entity_id), 60, "the restored grid to go"
         )
+        # The page names the reversal "Undo of <the change's time>" and the change "Undone"
+        ui.goto("/audit")
+        undone_at = (
+            datetime.fromisoformat(entry["time"].replace("Z", "+00:00"))
+            .astimezone(timezone.utc)
+            .strftime("%Y-%m-%d %H:%M:%S")
+        )
+        undo_row = ui.page.locator("tr", has_text=f"Undo of {undone_at}")
+        undone_row = ui.page.locator("tr", has_text=undone_at).filter(has_text="Undone")
+        wait(lambda: undo_row.count() > 0, 15, f"an 'Undo of {undone_at}' row", 1)
+        if undone_row.count() == 0:
+            raise Fail(f"the restore of {undone_at} isn't shown as Undone")
+        ui.shot("audit-undone")
         after = chat.ask("restore my ship", "Restore result: Restored.")
         wait(lambda: grid_present(LOSS_SHIP.entity_id), 30, "Loss ship back again")
         return (
