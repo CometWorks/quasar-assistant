@@ -55,3 +55,6 @@ plugin-package/
 .env
 .env.*
 *.local.json
+
+# Python bytecode (the rig)
+__pycache__/
