@@ -20,7 +20,8 @@ public sealed class AssistantQuasarPlugin : IQuasarPlugin
             Path.Combine(context.InstallDirectory, "plugin-data", context.PluginId)
         );
 
-    // No endpoints and no operations: nothing an operation or agent could call reaches the settings.
+    // No endpoints. The only operations are the MCP calls, registered with the services: nothing an operation
+    // or agent could call reaches the settings.
     public void ConfigureEndpoints(IEndpointRouteBuilder endpoints, QuasarPluginContext context) { }
 
     public IEnumerable<Assembly> GetRazorAssemblies()
