@@ -119,6 +119,9 @@
             <textarea class="assistant-wide" rows="2" maxlength="1000" @bind="_player.PrivacyNotice" placeholder="@PlayerRequestHandler.PrivacyNotice(Store.Current with { Player = Store.Current.Player with { PrivacyNotice = "" } })"></textarea>
         </label>
 
+        <RoleEditor Form="_playerRole" Role="@AssistantRoles.Player" AllBackends="BackendNames" Operations="ToolCatalog.OfRole(_operations, AssistantRoles.Player).ToList()" />
+        <SkillsEditor Role="@AssistantRoles.Player" />
+
         <h3>Grid restores</h3>
         <p class="assistant-hint">The player names the grid; these rules decide the rest. In apply mode a restore runs at once for the causes ticked here; any other cause, a missing loss record or no free spot makes it a proposal. An undo gives the restore back to the player's quota.</p>
         <div class="assistant-form">
@@ -144,8 +147,6 @@
             }
         </fieldset>
 
-        <RoleEditor Form="_playerRole" Role="@AssistantRoles.Player" AllBackends="BackendNames" Operations="ToolCatalog.OfRole(_operations, AssistantRoles.Player).ToList()" />
-        <SkillsEditor Role="@AssistantRoles.Player" />
         <button type="button" class="assistant-button assistant-button-primary" @onclick="SavePlayer">Save player support</button>
     </section>
 
