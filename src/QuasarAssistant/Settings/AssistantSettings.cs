@@ -96,8 +96,12 @@ public sealed record DiscordSettings
 /// <summary>Per-player limits, keyed by Steam ID, or Discord ID for a user without a link.</summary>
 public sealed record PlayerLimits
 {
-    public int RequestsPerHour { get; init; } = 10;
-    public int RequestsPerDay { get; init; } = 30;
+    /// <summary>Questions a player has at most. A new player starts with all of them; each question uses one.</summary>
+    public int MaxMessages { get; init; } = 24;
+
+    /// <summary>Every this many minutes the player gets <see cref="RefillMessages"/> back, up to the maximum.</summary>
+    public int RefillMinutes { get; init; } = 60;
+    public int RefillMessages { get; init; } = 1;
 
     /// <summary>Change tool calls that ran or became a proposal. Grid restores have their own limits.</summary>
     public int ActionsPerDay { get; init; } = 3;

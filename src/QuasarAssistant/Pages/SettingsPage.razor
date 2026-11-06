@@ -115,8 +115,9 @@
         <p class="assistant-hint">Players ask with <code>!ask</code> in game and <code>/ask</code> on Discord. The player agent only ever reaches the asking player's own grids and the server's public information.</p>
         <div class="assistant-form">
             <label class="assistant-check"><input type="checkbox" @bind="_player.Enabled" /> Answer players</label>
-            <label>Requests per player an hour <input type="number" min="0" @bind="_player.RequestsPerHour" /></label>
-            <label>Requests per player a day <input type="number" min="0" @bind="_player.RequestsPerDay" /></label>
+            <label>Questions a player has at most <input type="number" min="0" @bind="_player.MaxMessages" /></label>
+            <label>Questions given back <input type="number" min="0" @bind="_player.RefillMessages" /></label>
+            <label>Every (minutes) <input type="number" min="1" @bind="_player.RefillMinutes" /></label>
             <label>Actions per player a day (changes and hand-overs; restores have their own limits) <input type="number" min="0" @bind="_player.ActionsPerDay" /></label>
             <label class="assistant-check"><input type="checkbox" @bind="_player.QuasarBook" /> Let players' questions read the Quasar book (the admins' handbook)</label>
         </div>
