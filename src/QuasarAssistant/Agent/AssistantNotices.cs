@@ -3,17 +3,19 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.Extensions.DependencyInjection;
 using Quasar.Plugin.Abstractions.Assistant;
 using Quasar.Plugin.Abstractions.Security;
+using QuasarAssistant.Monitoring;
 using QuasarAssistant.Settings;
 using QuasarAssistant.Storage;
 
 namespace QuasarAssistant.Agent;
 
-/// <summary>Web push: a notice per pending proposal to each admin who could approve it, and per open hand-over to
-/// each admin who controls servers.</summary>
+/// <summary>Web push: a notice per pending proposal to each admin who could approve it, and per open hand-over
+/// and monitor run to each admin who controls servers.</summary>
 public sealed class AssistantNotices(
     SettingsStore settings,
     ProposalStore proposals,
     HandoverStore handovers,
+    IncidentStore incidents,
     ProposalService service,
     IServiceScopeFactory scopes
 ) : IQuasarNoticeSource
@@ -35,11 +37,36 @@ public sealed class AssistantNotices(
                         // Core sends each key once per browser, so a proposal is announced once.
                         "quasar.assistant/proposal/" + proposal.Id,
                         "The assistant proposes a change",
-                        $"{proposal.AskerName} asked; the assistant proposes {proposal.Operation}. Approve or reject it.",
+                        proposal.Role == AssistantRoles.Monitor
+                            ? $"The monitor proposes {proposal.Operation}. Approve or reject it."
+                            : $"{proposal.AskerName} asked; the assistant proposes {proposal.Operation}. Approve or reject it.",
                         "/assistant/approvals",
                         proposal.Created
                     )
                 );
+        var controls = (
+            await authorization.AuthorizeAsync(
+                subscriber,
+                null,
+                QuasarPolicyNames.CanControlServers
+            )
+        ).Succeeded;
+        if (controls)
+            foreach (var incident in incidents.All.Where(i => i.Runs.Count > 0))
+            {
+                var run = incident.Runs[^1];
+                notices.Add(
+                    new QuasarNotice(
+                        // One notice per run: a recheck is announced again.
+                        $"quasar.assistant/incident/{incident.Id}/{incident.Runs.Count}",
+                        "The monitor found a problem",
+                        $"{incident.Text} {Cut(run.Answer, 300)}",
+                        "/assistant/monitor",
+                        run.Time,
+                        "warning"
+                    )
+                );
+            }
         if (
             handovers.Open.Any()
             && (
@@ -63,4 +90,7 @@ public sealed class AssistantNotices(
                 );
         return notices;
     }
+
+    private static string Cut(string text, int length) =>
+        text.Length <= length ? text : text[..length] + "…";
 }

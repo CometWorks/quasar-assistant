@@ -95,7 +95,10 @@
     </div>
 </details>
 
-<McpEditor Role="@Role" Servers="Form.McpServers" />
+@if (Role != AssistantRoles.Monitor)
+{
+    <McpEditor Role="@Role" Servers="Form.McpServers" />
+}
 
 @code {
     [Parameter, EditorRequired] public RoleForm Form { get; set; } = null!;
@@ -107,9 +110,16 @@
 
     private string? _addBackend;
 
-    private string Label => Role == AssistantRoles.Player ? "player agent" : "assistant";
+    private string Label => Role switch
+    {
+        AssistantRoles.Player => "player agent",
+        AssistantRoles.Monitor => "monitor",
+        _ => "assistant",
+    };
 
-    private string ModesHint => Role == AssistantRoles.Player
+    private string ModesHint => Role == AssistantRoles.Monitor
+        ? "Per area of operations: off hides them, read offers only reads, propose turns each change into a proposal an admin approves, apply runs changes at once with nobody watching. The monitor acts for nobody, so Quasar checks each call only against the monitor's own roles. Set apply only for what it may do alone, such as servers.restart."
+        : Role == AssistantRoles.Player
         ? "Per tool: off hides it, read offers only reads, propose turns each change into a proposal an admin approves, apply runs it at once. A grid restore in apply runs at once only for the loss causes allowed below. The player only ever reaches their own things."
         : "Per area of operations: off hides them, read offers only reads, propose turns each change into a proposal an admin approves, apply runs changes at once (on Discord changes are always proposals). Every call is still checked against the asker's own permissions. Operations Quasar closes to agents, by its deny list and the current access rules, aren't listed.";
 

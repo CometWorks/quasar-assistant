@@ -24,12 +24,20 @@ public sealed record AskRequest(string Text, IReadOnlyList<string> HostLines)
 
     public Func<bool>? TryUseAction { get; init; }
     public string? Source { get; init; }
+
+    /// <summary>Uncached input and output tokens the run may use; it stops before the next model turn once they
+    /// are used up. Null: no budget.</summary>
+    public long? TokenBudget { get; init; }
 }
 
-/// <param name="Outcome"><c>ok</c>, <c>busy</c>, <c>deadline</c>, <c>turn-limit</c>, <c>backends-failed</c>,
-/// <c>rejected</c>, <c>stopped</c> or <c>error</c>, as in the metrics.</param>
+/// <param name="Outcome"><c>ok</c>, <c>busy</c>, <c>deadline</c>, <c>turn-limit</c>, <c>budget</c>,
+/// <c>backends-failed</c>, <c>rejected</c>, <c>stopped</c> or <c>error</c>, as in the metrics.</param>
 /// <param name="Text">The final answer, or what stopped the run.</param>
-public sealed record RunResult(string Outcome, string Text);
+public sealed record RunResult(string Outcome, string Text)
+{
+    public TokenUsage Usage { get; init; } = TokenUsage.None;
+    public IReadOnlyList<string> Tools { get; init; } = [];
+}
 
 /// <summary>
 /// Runs the agent loop: the prompt prefix, the conversation and the new user turn go to the role's backends; the
@@ -195,6 +203,13 @@ public sealed class AssistantRunner(
             outcome = "turn-limit";
             while (turns < role.MaxTurns)
             {
+                if (ask.TokenBudget is { } budget && usage.Uncached >= budget)
+                {
+                    outcome = "budget";
+                    reply = "Stopped: the token budget is used up.";
+                    conversations.Append(conversation, Error(reply));
+                    break;
+                }
                 turns++;
                 run.Status = "Thinking";
                 conversations.Touch(conversation.Id);
@@ -311,7 +326,7 @@ public sealed class AssistantRunner(
                 Seconds = clock.Elapsed.TotalSeconds,
             }
         );
-        return new RunResult(outcome, reply);
+        return new RunResult(outcome, reply) { Usage = usage, Tools = called };
     }
 
     private SemaphoreSlim Pool(string role, int size)

@@ -20,7 +20,10 @@ public static class AssistantRoles
     /// <summary>The player support agent: <c>!ask</c> in game and <c>/ask</c> on Discord.</summary>
     public const string Player = "player";
 
-    public static readonly IReadOnlyList<string> All = [Admin, Player];
+    /// <summary>The monitor: checks the servers and clusters and runs a model only when a check finds a problem.</summary>
+    public const string Monitor = "monitor";
+
+    public static readonly IReadOnlyList<string> All = [Admin, Player, Monitor];
 }
 
 /// <summary>One agent role: its backends, operation modes, MCP servers and limits.</summary>
@@ -48,7 +51,12 @@ public sealed record RoleSettings
 
     /// <summary>The settings of a role nobody has saved yet.</summary>
     public static RoleSettings DefaultFor(string role) =>
-        role == AssistantRoles.Player ? new() { QueueWaitSeconds = 60 } : new();
+        role switch
+        {
+            AssistantRoles.Player => new() { QueueWaitSeconds = 60 },
+            AssistantRoles.Monitor => new() { MaxConcurrentRuns = 1, QueueWaitSeconds = 600 },
+            _ => new(),
+        };
 }
 
 /// <summary>A remote MCP server. Its extra headers are secrets, stored apart like the API keys.</summary>
@@ -145,6 +153,43 @@ public sealed record PlayerSupportSettings
     public RestoreRules Restore { get; init; } = new();
 }
 
+[JsonConverter(typeof(JsonStringEnumConverter<BudgetPeriod>))]
+public enum BudgetPeriod
+{
+    Day,
+    Week,
+    Month,
+}
+
+/// <summary>The monitor's checks, script and token budget. The checks and the script run without a model.</summary>
+public sealed record MonitorSettings
+{
+    public bool Enabled { get; init; }
+    public int CheckSeconds { get; init; } = 60;
+
+    /// <summary>How long a server or cluster that should run may be down or unhealthy before it is a problem.</summary>
+    public int GraceMinutes { get; init; } = 5;
+
+    /// <summary>A running server below this sim speed for <see cref="SlowMinutes"/> is a problem; 0 turns it off.</summary>
+    public double MinSimSpeed { get; init; } = 0.5;
+    public int SlowMinutes { get; init; } = 10;
+
+    /// <summary>A running server without a world save for this long is a problem; 0 turns it off.</summary>
+    public int MaxSaveAgeMinutes { get; init; } = 60;
+
+    /// <summary>A program run with each check; every line it prints is a problem. Empty: no script.</summary>
+    public string ScriptCommand { get; init; } = "";
+    public string ScriptArguments { get; init; } = "";
+    public int ScriptTimeoutSeconds { get; init; } = 30;
+
+    /// <summary>A problem that is still there gets another model run after this long.</summary>
+    public int RecheckMinutes { get; init; } = 60;
+
+    /// <summary>Uncached input and output tokens the monitor's runs may use per period (UTC calendar).</summary>
+    public long BudgetTokens { get; init; } = 500_000;
+    public BudgetPeriod BudgetPeriod { get; init; } = BudgetPeriod.Month;
+}
+
 public sealed record AssistantSettings
 {
     public List<BackendSettings> Backends { get; init; } = [];
@@ -156,6 +201,7 @@ public sealed record AssistantSettings
     public NotificationSettings Notifications { get; init; } = new();
     public DiscordSettings Discord { get; init; } = new();
     public PlayerSupportSettings Player { get; init; } = new();
+    public MonitorSettings Monitor { get; init; } = new();
 
     public RoleSettings Role(string role) =>
         Roles.GetValueOrDefault(role) ?? RoleSettings.DefaultFor(role);

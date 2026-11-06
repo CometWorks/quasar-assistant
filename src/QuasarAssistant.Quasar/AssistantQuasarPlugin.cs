@@ -49,6 +49,14 @@ public sealed class AssistantQuasarPlugin : IQuasarPlugin
             QuasarPolicyNames.CanUseAssistant
         );
         yield return new QuasarNavItem(
+            "Monitor",
+            "/assistant/monitor",
+            AssistantIcons.Monitor,
+            QuasarNavZones.Tools,
+            702,
+            QuasarPolicyNames.CanUseAssistant
+        );
+        yield return new QuasarNavItem(
             "Assistant settings",
             "/assistant/settings",
             AssistantIcons.Settings,

@@ -148,7 +148,7 @@ public sealed partial class SkillLibrary(AssistantPaths paths, SettingsStore set
     }
 
     private bool WithBook(string role) =>
-        role == AssistantRoles.Admin || settings.Current.Player.QuasarBook;
+        role != AssistantRoles.Player || settings.Current.Player.QuasarBook;
 
     private string Folder(string role) =>
         Path.Combine(

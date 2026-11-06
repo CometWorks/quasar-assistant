@@ -1,0 +1,70 @@
+@page "/assistant/monitor"
+@attribute [Authorize(Policy = QuasarPolicyNames.CanUseAssistant)]
+@using QuasarAssistant.Monitoring
+@implements IDisposable
+@inject IncidentStore Incidents
+@inject MonitorBudget Budget
+@inject MonitorChecks Checks
+@inject SettingsStore Settings
+
+<PageTitle>Monitor</PageTitle>
+<div class="assistant-surface">
+    <h1>Monitor</h1>
+    <p class="assistant-hint">Problems the monitor's checks found on the servers and clusters, and what the model found and did about them. Its changes in propose mode wait on the Approvals page.</p>
+    @if (!Settings.Current.Monitor.Enabled)
+    {
+        <p class="assistant-notice">The monitor is off. An admin turns it on in the assistant settings.</p>
+    }
+    @if (Checks.LastError is { } error)
+    {
+        <p class="assistant-error" role="alert">The last check couldn't read the servers: @error</p>
+    }
+    <p role="status">@SettingsPage.BudgetLine(Budget.Status())</p>
+
+    <h2>Open</h2>
+    @{ var open = Incidents.All.Where(i => i.Resolved is null).OrderByDescending(i => i.Opened).ToList(); }
+    @if (open.Count == 0)
+    {
+        <p>No open problem.</p>
+    }
+    @foreach (var incident in open)
+    {
+        @Card(incident)
+    }
+
+    <h2>Resolved</h2>
+    @{ var resolved = Incidents.All.Where(i => i.Resolved is not null).OrderByDescending(i => i.Resolved).Take(50).ToList(); }
+    @if (resolved.Count == 0)
+    {
+        <p>Nothing resolved yet.</p>
+    }
+    @foreach (var incident in resolved)
+    {
+        @Card(incident)
+    }
+</div>
+
+@code {
+    private RenderFragment Card(Incident incident) =>
+        @<article class="assistant-proposal @(incident.Resolved is null ? "" : "assistant-proposal-approved")" @key="incident.Id">
+            <h3>@incident.Text</h3>
+            <p class="assistant-hint">
+                <code>@incident.Key</code>, seen first @Utc(incident.Opened), last @Utc(incident.LastSeen)@(incident.Resolved is { } at ? ", gone " + Utc(at) : "")
+            </p>
+            @foreach (var run in incident.Runs)
+            {
+                <details open="@(run == incident.Runs[^1])">
+                    <summary>@Utc(run.Time): @run.Outcome, @run.Tokens.ToString("N0") tokens@(run.Usd is { } usd ? $", about USD {usd:0.000}" : "")@(run.Tools.Count > 0 ? ", tools: " + string.Join(", ", run.Tools) : "")</summary>
+                    <div class="assistant-message assistant-message-answer">@run.Answer</div>
+                </details>
+            }
+        </article>;
+
+    private static string Utc(DateTimeOffset time) => time.UtcDateTime.ToString("yyyy-MM-dd HH:mm") + " UTC";
+
+    protected override void OnInitialized() => Incidents.Changed += OnChanged;
+
+    private void OnChanged() => _ = InvokeAsync(StateHasChanged);
+
+    public void Dispose() => Incidents.Changed -= OnChanged;
+}

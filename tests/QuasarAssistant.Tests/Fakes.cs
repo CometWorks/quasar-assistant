@@ -135,6 +135,9 @@ public sealed class FakePrincipals : IQuasarAgentPrincipals
         identity.AddClaim(new Claim("asker", asker.Identity!.Name!));
         return Task.FromResult(new ClaimsPrincipal(identity));
     }
+
+    public ClaimsPrincipal CreateMonitor(string conversationId, string request) =>
+        new(PlayerAsk.Identity(QuasarAgentKind.Monitor, null, null, null, conversationId));
 }
 
 public sealed class FakeAuditLog : IQuasarAuditLog
@@ -293,7 +296,7 @@ public sealed class PlayerAsk
                     null,
                     conversationId,
                     "!ask",
-                    kind == QuasarAgentKind.Assistant ? new[] { "editor" } : Array.Empty<string>(),
+                    kind != QuasarAgentKind.Player ? new[] { "editor" } : Array.Empty<string>(),
                     kind == QuasarAgentKind.Player ? "alpha" : null,
                 ],
                 null

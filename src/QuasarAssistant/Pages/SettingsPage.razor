@@ -2,10 +2,12 @@
 @attribute [Authorize(Policy = QuasarPolicyNames.CanManageSecurity)]
 @using System.Diagnostics
 @using System.Text.Json.Nodes
+@using QuasarAssistant.Monitoring
 @inject SettingsStore Store
 @inject ToolCatalog Catalog
 @inject LlmClient Client
 @inject MetricsLog Metrics
+@inject MonitorBudget Budget
 @inject TimeProvider Time
 
 <PageTitle>Assistant settings</PageTitle>
@@ -87,6 +89,9 @@
                 <label>Stall timeout (s, empty: none) <input type="number" min="1" step="any" @bind="_form.StallTimeout" /></label>
                 <label>Cooldown (s) <input type="number" min="0" step="any" @bind="_form.Cooldown" /></label>
                 <label>Maximum cooldown (s) <input type="number" min="0" step="any" @bind="_form.MaxCooldown" /></label>
+                <label>Input price, USD per million tokens (empty: unknown) <input type="number" min="0" step="any" @bind="_form.InputPrice" /></label>
+                <label>Cached input price (empty: the input price) <input type="number" min="0" step="any" @bind="_form.CachedInputPrice" /></label>
+                <label>Output price <input type="number" min="0" step="any" @bind="_form.OutputPrice" /></label>
                 <label>Headers, one <code>Name: value</code> per line (keys go in the API key field) <textarea rows="3" @bind="_form.Headers"></textarea></label>
                 <label>Extra body, a JSON object merged into each request <textarea rows="3" @bind="_form.ExtraBody" placeholder='{"provider": {"sort": "price"}}'></textarea></label>
                 <div class="assistant-row">
@@ -151,6 +156,46 @@
     </section>
 
     <section>
+        <h2>Monitor</h2>
+        <p class="assistant-hint">Checks the standalone servers and clusters that should run, without a model. Only when a check finds a problem does it run a model in the monitor role, which looks for the cause and fixes it within the modes below. Admins read the result on the Monitor page, by web push and in the admin Discord channel. The monitor acts for nobody: Quasar limits it by the monitor roles on its Security page.</p>
+        <div class="assistant-form">
+            <label class="assistant-check"><input type="checkbox" @bind="_monitor.Enabled" /> Watch the servers and clusters</label>
+            <label>Check every (s) <input type="number" min="10" @bind="_monitor.CheckSeconds" /></label>
+            <label>Down or unhealthy this long is a problem (min) <input type="number" min="0" @bind="_monitor.GraceMinutes" /></label>
+            <label>Lowest sim speed (0: no check) <input type="number" min="0" max="1" step="0.05" @bind="_monitor.MinSimSpeed" /></label>
+            <label>Below it this long is a problem (min) <input type="number" min="0" @bind="_monitor.SlowMinutes" /></label>
+            <label>Longest time without a world save (min, 0: no check) <input type="number" min="0" @bind="_monitor.MaxSaveAgeMinutes" /></label>
+            <label>Run the model again for a problem still there after (min) <input type="number" min="1" @bind="_monitor.RecheckMinutes" /></label>
+        </div>
+
+        <h3>Script</h3>
+        <p class="assistant-hint">Runs with every check as Quasar's own user, without a shell. Each line it prints is a problem. The text before the first <code>: </code> is the problem's key, and the same key means the same problem. A script that fails without printing anything is a problem too.</p>
+        <div class="assistant-form">
+            <label>Program (empty: no script) <input @bind="_monitor.ScriptCommand" placeholder="/opt/checks/disk.sh" /></label>
+            <label>Arguments <input @bind="_monitor.ScriptArguments" /></label>
+            <label>Timeout (s) <input type="number" min="1" @bind="_monitor.ScriptTimeoutSeconds" /></label>
+        </div>
+
+        <h3>Token budget</h3>
+        <p class="assistant-hint">Counts the uncached input and output tokens of the monitor's runs per UTC calendar day, week (from Monday) or month. With no budget left no run starts and the admins are told once per period. A run stops before its next model turn once it has used up the rest.</p>
+        <div class="assistant-form">
+            <label>Tokens <input type="number" min="0" step="1000" @bind="_monitor.BudgetTokens" /></label>
+            <label>Per
+                <select @bind="_monitor.BudgetPeriod">
+                    @foreach (var period in Enum.GetValues<BudgetPeriod>())
+                    {
+                        <option value="@period">@period.ToString().ToLowerInvariant()</option>
+                    }
+                </select>
+            </label>
+        </div>
+        <p role="status">@BudgetLine(Budget.Status())</p>
+
+        <RoleEditor Form="_monitorRole" Role="@AssistantRoles.Monitor" AllBackends="BackendNames" Operations="ToolCatalog.OfRole(_operations, AssistantRoles.Monitor).ToList()" />
+        <button type="button" class="assistant-button assistant-button-primary" @onclick="SaveMonitor">Save the monitor</button>
+    </section>
+
+    <section>
         <h2>Notifications and Discord</h2>
         <div class="assistant-form">
             <label class="assistant-check"><input type="checkbox" @bind="_general.Cards" /> Proposal cards in the conversation (the Approvals page is always there)</label>
@@ -208,6 +253,8 @@
     private AssistantSettings _settings = new();
     private RoleForm _admin = new();
     private RoleForm _playerRole = new();
+    private RoleForm _monitorRole = new();
+    private MonitorForm _monitor = new();
     private PlayerForm _player = new();
     private GeneralForm _general = new();
     private BackendForm? _form;
@@ -229,6 +276,8 @@
         _settings = Store.Current;
         _admin = RoleForm.From(_settings.Role(AssistantRoles.Admin));
         _playerRole = RoleForm.From(_settings.Role(AssistantRoles.Player));
+        _monitorRole = RoleForm.From(_settings.Role(AssistantRoles.Monitor));
+        _monitor = MonitorForm.From(_settings.Monitor);
         _player = PlayerForm.From(_settings.Player);
         _general = GeneralForm.From(_settings);
     }
@@ -306,7 +355,12 @@
                 Store.SetMcpHeaders(name, serverName, headers);
         }
         Load();
-        Say(name == AssistantRoles.Player ? "Saved player support." : "Saved the admin assistant.");
+        Say(name switch
+        {
+            AssistantRoles.Player => "Saved player support.",
+            AssistantRoles.Monitor => "Saved the monitor.",
+            _ => "Saved the admin assistant.",
+        });
         return true;
     }
 
@@ -319,6 +373,27 @@
         }
         Store.Save(Store.Current with { Player = _player.ToSettings() });
         SaveRole(AssistantRoles.Player, _playerRole);
+    }
+
+    private void SaveMonitor()
+    {
+        if (_monitorRole.Validate() is { } problem)
+        {
+            Say(problem, failed: true);
+            return;
+        }
+        Store.Save(Store.Current with { Monitor = _monitor.ToSettings() });
+        SaveRole(AssistantRoles.Monitor, _monitorRole);
+    }
+
+    internal static string BudgetLine(BudgetStatus status)
+    {
+        var period = status.Period.ToString().ToLowerInvariant();
+        var money = status is { SpentUsd: { } spent, LimitUsd: { } limit }
+            ? $" (about USD {spent:0.00} of {limit:0.00})"
+            : "";
+        return $"This {period}: {status.Spent:N0} of {status.Limit:N0} tokens used{money}. It resets at {status.Resets.UtcDateTime:yyyy-MM-dd HH:mm} UTC."
+            + (money.Length == 0 ? " Set the prices of the monitor's backends to see it in money." : "");
     }
 
     private void SaveGeneral()
@@ -363,6 +438,54 @@
     {
         _message = message;
         _failed = failed;
+    }
+
+    private sealed class MonitorForm
+    {
+        public bool Enabled { get; set; }
+        public int CheckSeconds { get; set; }
+        public int GraceMinutes { get; set; }
+        public double MinSimSpeed { get; set; }
+        public int SlowMinutes { get; set; }
+        public int MaxSaveAgeMinutes { get; set; }
+        public int RecheckMinutes { get; set; }
+        public string ScriptCommand { get; set; } = "";
+        public string ScriptArguments { get; set; } = "";
+        public int ScriptTimeoutSeconds { get; set; }
+        public long BudgetTokens { get; set; }
+        public BudgetPeriod BudgetPeriod { get; set; }
+
+        public static MonitorForm From(MonitorSettings s) => new()
+        {
+            Enabled = s.Enabled,
+            CheckSeconds = s.CheckSeconds,
+            GraceMinutes = s.GraceMinutes,
+            MinSimSpeed = s.MinSimSpeed,
+            SlowMinutes = s.SlowMinutes,
+            MaxSaveAgeMinutes = s.MaxSaveAgeMinutes,
+            RecheckMinutes = s.RecheckMinutes,
+            ScriptCommand = s.ScriptCommand,
+            ScriptArguments = s.ScriptArguments,
+            ScriptTimeoutSeconds = s.ScriptTimeoutSeconds,
+            BudgetTokens = s.BudgetTokens,
+            BudgetPeriod = s.BudgetPeriod,
+        };
+
+        public MonitorSettings ToSettings() => new()
+        {
+            Enabled = Enabled,
+            CheckSeconds = Math.Max(10, CheckSeconds),
+            GraceMinutes = Math.Max(0, GraceMinutes),
+            MinSimSpeed = Math.Clamp(MinSimSpeed, 0, 1),
+            SlowMinutes = Math.Max(0, SlowMinutes),
+            MaxSaveAgeMinutes = Math.Max(0, MaxSaveAgeMinutes),
+            RecheckMinutes = Math.Max(1, RecheckMinutes),
+            ScriptCommand = ScriptCommand.Trim(),
+            ScriptArguments = ScriptArguments.Trim(),
+            ScriptTimeoutSeconds = Math.Max(1, ScriptTimeoutSeconds),
+            BudgetTokens = Math.Max(0, BudgetTokens),
+            BudgetPeriod = BudgetPeriod,
+        };
     }
 
     private sealed class GeneralForm
@@ -418,6 +541,9 @@
         public double MaxCooldown { get; set; }
         public string Headers { get; set; } = "";
         public string ExtraBody { get; set; } = "";
+        public double? InputPrice { get; set; }
+        public double? CachedInputPrice { get; set; }
+        public double? OutputPrice { get; set; }
 
         public static BackendForm From(BackendSettings? backend)
         {
@@ -440,6 +566,9 @@
                 MaxCooldown = b.MaxCooldown,
                 Headers = string.Join('\n', b.Headers.Select(pair => $"{pair.Key}: {pair.Value}")),
                 ExtraBody = b.ExtraBody?.ToJsonString() ?? "",
+                InputPrice = b.InputPrice,
+                CachedInputPrice = b.CachedInputPrice,
+                OutputPrice = b.OutputPrice,
             };
         }
 
@@ -492,6 +621,9 @@
                 .GroupBy(parts => parts[0].Trim())
                 .ToDictionary(group => group.Key, group => group.Last()[1].Trim()),
             ExtraBody = ExtraBody.Trim().Length > 0 ? JsonNode.Parse(ExtraBody)!.AsObject() : null,
+            InputPrice = InputPrice is >= 0 ? InputPrice : null,
+            CachedInputPrice = CachedInputPrice is >= 0 ? CachedInputPrice : null,
+            OutputPrice = OutputPrice is >= 0 ? OutputPrice : null,
         };
     }
 }

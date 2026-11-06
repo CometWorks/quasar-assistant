@@ -16,6 +16,10 @@ public sealed class AdminNotifier(
     public string ApprovalsUrl =>
         settings.Current.Discord.PublicUrl.Trim().TrimEnd('/') + "/assistant/approvals";
 
+    /// <summary>The monitor's page, absolute when Quasar's public URL is set.</summary>
+    public string MonitorUrl =>
+        settings.Current.Discord.PublicUrl.Trim().TrimEnd('/') + "/assistant/monitor";
+
     public async Task PostAsync(string text, CancellationToken token)
     {
         var current = settings.Current;

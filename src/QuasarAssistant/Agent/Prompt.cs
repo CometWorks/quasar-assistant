@@ -14,10 +14,18 @@ public static class Prompt
 {
     private static readonly string AdminBase = ReadBase("QuasarAssistant.system-prompt.md");
     private static readonly string PlayerBase = ReadBase("QuasarAssistant.player-system-prompt.md");
+    private static readonly string MonitorBase = ReadBase(
+        "QuasarAssistant.monitor-system-prompt.md"
+    );
 
     public static string System(string roleName, RoleSettings role)
     {
-        var text = roleName == AssistantRoles.Player ? PlayerBase : AdminBase;
+        var text = roleName switch
+        {
+            AssistantRoles.Player => PlayerBase,
+            AssistantRoles.Monitor => MonitorBase,
+            _ => AdminBase,
+        };
         return string.IsNullOrWhiteSpace(role.RoleText)
             ? text
             : text + "\n# Notes from the admins\n\n" + role.RoleText.Trim() + "\n";

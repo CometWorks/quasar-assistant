@@ -9,6 +9,7 @@ using Quasar.Plugin.Abstractions.Security;
 using QuasarAssistant.Agent;
 using QuasarAssistant.Llm;
 using QuasarAssistant.Mcp;
+using QuasarAssistant.Monitoring;
 using QuasarAssistant.Players;
 using QuasarAssistant.Settings;
 using QuasarAssistant.Skills;
@@ -58,6 +59,11 @@ public static class AssistantServiceCollectionExtensions
         services.AddSingleton<IQuasarNoticeSource, AssistantNotices>();
         services.AddSingleton<IQuasarPlayerRequestHandler, PlayerRequestHandler>();
         services.AddSingleton<IQuasarAdminRequestHandler, DiscordAdminHandler>();
+        services.AddSingleton<MonitorChecks>();
+        services.AddSingleton<MonitorBudget>();
+        services.AddSingleton<IncidentStore>();
+        services.AddSingleton<MonitorService>();
+        services.AddHostedService(provider => provider.GetRequiredService<MonitorService>());
         services.AddHostedService<AssistantMaintenance>();
         AddMcpOperations(services);
         return services;
@@ -131,14 +137,15 @@ public static class AssistantServiceCollectionExtensions
     }
 }
 
-/// <summary>On start: fetches the MCP servers' tools. Hourly: deletes old conversations and expires old proposals
-/// and hand-overs, and drops undelivered player notes as old.</summary>
+/// <summary>On start: fetches the MCP servers' tools. Hourly: deletes old conversations, expires old proposals
+/// and hand-overs, and drops undelivered player notes and resolved incidents as old.</summary>
 internal sealed class AssistantMaintenance(
     SettingsStore settings,
     ConversationStore conversations,
     ProposalService proposals,
     HandoverStore handovers,
     PlayerOutbox outbox,
+    IncidentStore incidents,
     McpRegistry mcp,
     TimeProvider time,
     ILogger<AssistantMaintenance> logger
@@ -157,6 +164,7 @@ internal sealed class AssistantMaintenance(
                 var expired = time.GetUtcNow().AddDays(-settings.Current.ProposalExpiryDays);
                 handovers.Forget(expired);
                 outbox.Forget(expired);
+                incidents.Forget(expired);
             }
             catch (Exception error) when (error is not OperationCanceledException)
             {

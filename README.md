@@ -4,7 +4,8 @@ An assistant for [Quasar](https://github.com/CometWorks/quasar), the control pan
 dedicated servers and clusters. Admins chat with it in a drawer on every Quasar page, on its own page and in
 the admin Discord channel. It answers from Quasar's operations: it reads server status, logs, settings and
 players, and it changes things or proposes changes as the admins allow. Players ask it with `!ask` in game and
-`/ask` on Discord about the server and their own grids, and it can restore a lost grid.
+`/ask` on Discord about the server and their own grids, and it can restore a lost grid. A monitor watches the
+servers and clusters and calls a model only when something goes wrong.
 
 It is a Quasar UI plugin (id `quasar.assistant`). It runs inside Quasar and talks to the model providers the
 admins set up. No provider or model ships with it.
@@ -85,6 +86,29 @@ empty inventories. Before anything is restored:
 
 The approval card shows the grid, the cause, the backup it will use and the placement.
 
+## Monitor
+
+Off until an admin turns it on. Every minute by default it checks, without a model, the standalone servers and
+clusters whose goal is on:
+
+- a server stopped, crashed or faulted, or unhealthy, for 5 minutes;
+- a cluster whose Gateway can't be read, or that isn't healthy, for 5 minutes;
+- a running server below sim speed 0.5 for 10 minutes, or without a world save for 60 minutes;
+- every line printed by the admins' script, if one is set. The text before the first `: ` is the problem's key.
+  A script that fails without printing anything, or runs past its timeout, is a problem too.
+
+A new problem opens an incident and gets one model run in the monitor role. If the problem is still there after
+the recheck time (60 minutes), it gets another run. When the checks no longer find it, the incident closes. Each
+run looks for the cause and fixes it within the role's modes: reads by default, changes as proposals, and apply
+only for operations the admins choose, such as `servers.restart`. Core runs the monitor's calls as its own agent,
+`agent:monitor`. That agent acts for nobody, so only the monitor roles on Quasar's Security page limit it. The
+result goes to the Monitor page, by web push to the admins who control servers, and to the admin Discord channel.
+
+The token budget is set per UTC day, week or month and counts only uncached input and output tokens. Without
+budget left, the incident is still recorded but no run starts, and the admins are told once per period. A run
+stops before its next model turn once it has used up the rest. With prices set on the backends, the settings and
+Monitor pages also show the budget and the spending in USD.
+
 ## Discord
 
 `/assistant` answers only in the admin channel set in the settings, for Discord users mapped to a Quasar
@@ -98,7 +122,8 @@ use `/ask`. New proposals and hand-overs can be posted to the admin channel with
 | Drawer on every page | `CanUseAssistant` | A launcher button and a chat panel that starts with the page and server as context. |
 | `/assistant/chat` | `CanUseAssistant` | Your conversations and a full-size chat. |
 | `/assistant/approvals` | `CanUseAssistant` | Players waiting for an admin, pending and decided proposals. Marking a hand-over handled needs `CanControlServers`. |
-| `/assistant/settings` | `CanManageSecurity` | Backends and API keys; per role the backend order, modes, limits, MCP servers and skills; player support and restore rules; notifications, Discord and usage. |
+| `/assistant/monitor` | `CanUseAssistant` | The monitor's open and resolved incidents, each run's answer, tokens and cost, and the budget. |
+| `/assistant/settings` | `CanManageSecurity` | Backends, their API keys and prices; per role the backend order, modes, limits, MCP servers and skills; player support and restore rules; the monitor's checks, script and budget; notifications, Discord and usage. |
 
 The plugin registers no endpoints and only the four MCP operations, which accept nothing but the assistant's
 own agents. Nothing an agent or a script can call reaches its settings.
@@ -117,7 +142,8 @@ Everything lives in `plugin-data/quasar.assistant/` in the Quasar data folder:
 | `handovers.json` | Players handed to the admins. |
 | `player-outbox.json` | Decisions on players' proposals they haven't heard yet, kept as long as proposals. |
 | `player-usage.json` | Per player: request and action times of the last day, and when the privacy notice was sent. |
-| `skills/admin/*.md`, `skills/player/*.md` | The admins' skills per role. |
+| `skills/admin/*.md`, `skills/player/*.md` | The admins' skills per role. The monitor reads the admin assistant's. |
+| `monitor.json` | The monitor's incidents and their runs; resolved ones go after the proposal expiry. |
 | `metrics.jsonl` | One line per run: role, backends, fallovers, failures, turns, tokens (cached and processed), duration. No message text. |
 
 ## Building
@@ -157,6 +183,7 @@ src/QuasarAssistant/          services and Razor UI
   Llm/                        message model, the two API formats, the client, failover
   Agent/                      tools and modes, the run loop, proposals, restores, hand-overs, the prompts
   Players/                    player requests, limits, Discord admin requests
+  Monitoring/                 the monitor's checks, script, incidents and token budget
   Mcp/                        the MCP client and the servers' tools
   Skills/                     the Quasar book and the admins' skills
   QuasarBook/                 the book's pages, pinned to a Quasar commit

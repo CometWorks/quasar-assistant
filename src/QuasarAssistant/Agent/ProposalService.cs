@@ -59,14 +59,14 @@ public sealed class ProposalService(
             Created = time.GetUtcNow(),
         };
         proposals.Add(proposal);
-        var who =
-            proposal.Role == AssistantRoles.Player
-                ? $"the player {proposal.AskerName}"
-                : proposal.AskerName;
-        await notifier.PostAsync(
-            $"The assistant proposes `{proposal.Operation}` for {who}. Approve or reject it: {notifier.ApprovalsUrl}",
-            token
-        );
+        var who = proposal.Role switch
+        {
+            AssistantRoles.Player =>
+                $"The assistant proposes `{proposal.Operation}` for the player {proposal.AskerName}",
+            AssistantRoles.Monitor => $"The monitor proposes `{proposal.Operation}`",
+            _ => $"The assistant proposes `{proposal.Operation}` for {proposal.AskerName}",
+        };
+        await notifier.PostAsync($"{who}. Approve or reject it: {notifier.ApprovalsUrl}", token);
         return proposal;
     }
 

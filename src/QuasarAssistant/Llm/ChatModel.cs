@@ -66,6 +66,9 @@ public sealed record TokenUsage(int Prompt, int Cached, int Completion)
 {
     public static readonly TokenUsage None = new(0, 0, 0);
 
+    /// <summary>What a token budget counts: input not read from the cache, and output.</summary>
+    public long Uncached => (long)Prompt - Cached + Completion;
+
     public TokenUsage Add(TokenUsage other) =>
         new(Prompt + other.Prompt, Cached + other.Cached, Completion + other.Completion);
 }

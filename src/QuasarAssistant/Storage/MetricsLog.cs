@@ -10,8 +10,8 @@ public sealed record RunMetrics
     public DateTimeOffset Time { get; init; }
     public string Role { get; init; } = "";
 
-    /// <summary><c>ok</c>, <c>busy</c> (queue wait passed), <c>deadline</c>, <c>turn-limit</c>, <c>backends-failed</c>,
-    /// <c>rejected</c>, <c>stopped</c> or <c>error</c>.</summary>
+    /// <summary><c>ok</c>, <c>busy</c> (queue wait passed), <c>deadline</c>, <c>turn-limit</c>, <c>budget</c>,
+    /// <c>backends-failed</c>, <c>rejected</c>, <c>stopped</c> or <c>error</c>.</summary>
     public string Outcome { get; init; } = "";
 
     /// <summary>The backends that answered a turn.</summary>
@@ -59,17 +59,21 @@ public sealed class MetricsLog(AssistantPaths paths)
         }
     }
 
-    public MetricsSummary Summarize(DateTimeOffset since)
+    public IReadOnlyList<RunMetrics> Runs(DateTimeOffset since)
     {
-        List<RunMetrics> runs;
         lock (_lock)
-            runs = File.Exists(_path)
+            return File.Exists(_path)
                 ? File.ReadLines(_path)
                     .Select(line => JsonSerializer.Deserialize<RunMetrics>(line, JsonFiles.Options))
                     .OfType<RunMetrics>()
                     .Where(run => run.Time >= since)
                     .ToList()
                 : [];
+    }
+
+    public MetricsSummary Summarize(DateTimeOffset since)
+    {
+        var runs = Runs(since);
         var days = runs.GroupBy(run => DateOnly.FromDateTime(run.Time.UtcDateTime))
             .OrderByDescending(day => day.Key)
             .Select(day => new DayMetrics(
