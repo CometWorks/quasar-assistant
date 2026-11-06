@@ -3,10 +3,12 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using Quasar.Plugin.Abstractions.Assistant;
+using Quasar.Plugin.Abstractions.Commands;
+using Quasar.Plugin.Abstractions.Notifications;
 using Quasar.Plugin.Abstractions.Operations;
 using Quasar.Plugin.Abstractions.Security;
 using QuasarAssistant.Agent;
+using QuasarAssistant.GridBackups;
 using QuasarAssistant.Llm;
 using QuasarAssistant.Mcp;
 using QuasarAssistant.Players;
@@ -18,6 +20,9 @@ namespace QuasarAssistant;
 
 public static class AssistantServiceCollectionExtensions
 {
+    /// <summary>The plugin's ID, under which it registers its operations.</summary>
+    public const string PluginId = "quasar.assistant";
+
     /// <param name="dataDirectory">The plugin's folder for settings, keys, conversations, proposals and metrics.</param>
     public static IServiceCollection AddQuasarAssistant(
         this IServiceCollection services,
@@ -56,10 +61,13 @@ public static class AssistantServiceCollectionExtensions
         services.AddSingleton<ToolExecutor>();
         services.AddSingleton<AssistantRunner>();
         services.AddSingleton<IQuasarNoticeSource, AssistantNotices>();
-        services.AddSingleton<IQuasarPlayerRequestHandler, PlayerRequestHandler>();
-        services.AddSingleton<IQuasarAdminRequestHandler, DiscordAdminHandler>();
+        services.AddSingleton<AskCommand>();
+        services.AddSingleton<AssistantCommand>();
+        services.AddSingleton<IQuasarChatCommand>(p => p.GetRequiredService<AskCommand>());
+        services.AddSingleton<IQuasarChatCommand>(p => p.GetRequiredService<AssistantCommand>());
         services.AddHostedService<AssistantMaintenance>();
         AddMcpOperations(services);
+        services.AddGridBackupsOperations();
         return services;
     }
 

@@ -5,10 +5,14 @@ using System.Text.Json;
 using Microsoft.AspNetCore.DataProtection;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using Quasar.Plugin.Abstractions.Assistant;
+using Quasar.Plugin.Abstractions.Commands;
+using Quasar.Plugin.Abstractions.Companion;
+using Quasar.Plugin.Abstractions.Discord;
 using Quasar.Plugin.Abstractions.Operations;
 using Quasar.Plugin.Abstractions.Security;
+using Quasar.Plugin.Abstractions.Servers;
 using QuasarAssistant.Agent;
+using QuasarAssistant.GridBackups;
 using QuasarAssistant.Llm;
 using QuasarAssistant.Players;
 using QuasarAssistant.Settings;
@@ -269,8 +273,9 @@ public sealed class PlayerAsk
 
     public static ClaimsPrincipal Agent(
         string steamId = "76561198000000001",
-        string name = "Pilot"
-    ) => new(Identity(QuasarAgentKind.Player, null, steamId, name, "steam:" + steamId));
+        string name = "Pilot",
+        string? server = "alpha"
+    ) => new(Identity(QuasarAgentKind.Player, null, steamId, name, "steam:" + steamId, server));
 
     /// <summary>Only core builds agent identities; the tests reach its internal constructor.</summary>
     public static QuasarAgentIdentity Identity(
@@ -278,7 +283,8 @@ public sealed class PlayerAsk
         ClaimsPrincipal? asker,
         string? steamId,
         string? name,
-        string conversationId
+        string conversationId,
+        string? server = "alpha"
     ) =>
         (QuasarAgentIdentity)
             Activator.CreateInstance(
@@ -294,27 +300,29 @@ public sealed class PlayerAsk
                     conversationId,
                     "!ask",
                     kind == QuasarAgentKind.Assistant ? new[] { "editor" } : Array.Empty<string>(),
-                    kind == QuasarAgentKind.Player ? "alpha" : null,
+                    kind == QuasarAgentKind.Player ? server : null,
                 ],
                 null
             )!;
 
-    public QuasarPlayerRequest Game(string text, string steamId = "76561198000000001") =>
+    public QuasarChatCommandRequest Game(string text, string steamId = "76561198000000001") =>
         new(
+            "ask",
             Agent(steamId),
             "steam:" + steamId,
             text,
-            new QuasarPlayerRequestSource(QuasarRequestChannel.Game, "alpha"),
+            new QuasarChatCommandSource(QuasarChatChannel.Game, "alpha"),
             Reply
         );
 
     /// <summary>A Discord user without a link: no player principal.</summary>
-    public QuasarPlayerRequest Unlinked(string text, string discordId = "555") =>
+    public QuasarChatCommandRequest Unlinked(string text, string discordId = "555") =>
         new(
+            "ask",
             null,
             "discord:" + discordId,
             text,
-            new QuasarPlayerRequestSource(QuasarRequestChannel.Discord, DiscordUserId: discordId),
+            new QuasarChatCommandSource(QuasarChatChannel.Discord, DiscordUserId: discordId),
             Reply
         );
 
@@ -323,6 +331,138 @@ public sealed class PlayerAsk
         lock (Replies)
             Replies.Add(text);
         return Task.CompletedTask;
+    }
+}
+
+/// <summary>Core's server queries over servers, players and grids a test sets up.</summary>
+public sealed class FakeServers : IQuasarServerQueries
+{
+    public List<QuasarServerTarget> Servers { get; } = [];
+
+    /// <summary>The agent ID of the node each player is on, by Steam ID.</summary>
+    public ConcurrentDictionary<string, string> Players { get; } = new();
+
+    /// <summary>The agent ID of the node that has each grid, by grid ID.</summary>
+    public ConcurrentDictionary<long, string> Grids { get; } = new();
+
+    /// <summary>The agent ID of the node owning the area around a position, or null.</summary>
+    public Func<(double X, double Y, double Z), string?> PositionOwner { get; set; } = _ => null;
+    public ConcurrentQueue<(double X, double Y, double Z, double Radius)> PositionQueries { get; } =
+        new();
+
+    /// <returns>The server's agent ID.</returns>
+    public string Standalone(string name, bool gridBackups = true)
+    {
+        var agentId = name + ":1";
+        Servers.Add(
+            new(name, name, false, [new(agentId, null, gridBackups ? [GridBackupsPluginId] : [])])
+        );
+        return agentId;
+    }
+
+    /// <returns>The nodes' agent IDs, <c>name-node:1</c>.</returns>
+    public string[] Cluster(string name, params string[] nodes)
+    {
+        var agentIds = nodes.Select(node => $"{name}-{node}:1").ToArray();
+        Servers.Add(
+            new(
+                name,
+                name,
+                true,
+                nodes
+                    .Select(
+                        (node, i) =>
+                            new QuasarServerNode(agentIds[i], "node-" + node, [GridBackupsPluginId])
+                    )
+                    .ToList()
+            )
+        );
+        return agentIds;
+    }
+
+    // Plugin IDs match ignoring case.
+    private static readonly string GridBackupsPluginId =
+        GridBackupsTools.GridBackupsPluginId.ToLowerInvariant();
+
+    public IReadOnlyList<QuasarServerTarget> GetServers() => Servers;
+
+    public string? FindPlayer(string server, string steamId) =>
+        Players.TryGetValue(steamId, out var agentId)
+        && Servers.Any(target =>
+            target.UniqueName == server && target.Nodes.Any(node => node.AgentId == agentId)
+        )
+            ? agentId
+            : null;
+
+    public Task<IReadOnlyDictionary<long, string>> FindGridsAsync(
+        string server,
+        IEnumerable<long> gridIds,
+        CancellationToken token
+    ) =>
+        Task.FromResult<IReadOnlyDictionary<long, string>>(
+            gridIds.Distinct().Where(Grids.ContainsKey).ToDictionary(id => id, id => Grids[id])
+        );
+
+    public Task<string?> FindPositionOwnerAsync(
+        string server,
+        double x,
+        double y,
+        double z,
+        double radiusMeters,
+        CancellationToken token
+    )
+    {
+        PositionQueries.Enqueue((x, y, z, radiusMeters));
+        return Task.FromResult(PositionOwner((x, y, z)));
+    }
+}
+
+/// <summary>The companion channel: records each request and answers from <see cref="Answer"/>.</summary>
+public sealed class FakeCompanion : IQuasarCompanionChannel
+{
+    private static readonly JsonSerializerOptions Web = new(JsonSerializerDefaults.Web);
+
+    public ConcurrentQueue<(
+        string AgentId,
+        string PluginId,
+        string Operation,
+        JsonElement Request,
+        TimeSpan? Timeout
+    )> Calls { get; } = new();
+
+    /// <summary>The answer by agent ID, operation and request.</summary>
+    public Func<string, string, JsonElement, object> Answer { get; set; } =
+        (_, _, _) => new { ok = true };
+
+    public Task<TResponse> SendAsync<TRequest, TResponse>(
+        string serverId,
+        string companionPluginId,
+        string operation,
+        TRequest request,
+        CancellationToken cancellationToken
+    ) => Send<TRequest, TResponse>(serverId, companionPluginId, operation, request, null);
+
+    public Task<TResponse> SendAsync<TRequest, TResponse>(
+        string serverId,
+        string companionPluginId,
+        string operation,
+        TRequest request,
+        TimeSpan timeout,
+        CancellationToken cancellationToken
+    ) => Send<TRequest, TResponse>(serverId, companionPluginId, operation, request, timeout);
+
+    private Task<TResponse> Send<TRequest, TResponse>(
+        string serverId,
+        string pluginId,
+        string operation,
+        TRequest request,
+        TimeSpan? timeout
+    )
+    {
+        var json = JsonSerializer.SerializeToElement(request, Web);
+        Calls.Enqueue((serverId, pluginId, operation, json, timeout));
+        var answer = JsonSerializer.SerializeToElement(Answer(serverId, operation, json), Web);
+        return Task.FromResult(answer.Deserialize<TResponse>(Web)!);
     }
 }
 
@@ -345,8 +485,7 @@ public sealed class Harness : IAsyncDisposable
     public AssistantRunner Runner => Services.GetRequiredService<AssistantRunner>();
     public ConversationStore Conversations => Services.GetRequiredService<ConversationStore>();
     public FakeDiscord Discord => Services.GetRequiredService<FakeDiscord>();
-    public PlayerRequestHandler Players =>
-        (PlayerRequestHandler)Services.GetRequiredService<IQuasarPlayerRequestHandler>();
+    public AskCommand Players => Services.GetRequiredService<AskCommand>();
 
     public static async Task<Harness> StartAsync(
         IEnumerable<QuasarOperation> operations,
@@ -394,7 +533,20 @@ public sealed class Harness : IAsyncDisposable
                 p => p.RequireAssertion(_ => false)
             );
         });
+        services.AddSingleton<FakeServers>();
+        services.AddSingleton<IQuasarServerQueries>(p => p.GetRequiredService<FakeServers>());
+        services.AddSingleton<FakeCompanion>();
+        services.AddSingleton<IQuasarCompanionChannel>(p => p.GetRequiredService<FakeCompanion>());
         services.AddQuasarAssistant(folder);
+        // A test operation stands in for the plugin's own one of the same key.
+        var replaced = operations.ToDictionary(op => op.Key);
+        foreach (var descriptor in services.ToList())
+            if (
+                descriptor.ImplementationInstance is QuasarOperation own
+                && replaced.TryGetValue(own.Key, out var test)
+                && test != own
+            )
+                services.Remove(descriptor);
         return new Harness
         {
             Folder = folder,

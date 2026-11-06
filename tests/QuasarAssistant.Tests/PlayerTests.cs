@@ -13,11 +13,19 @@ public sealed class PlayerTests
 {
     private const BackendKind Kind = BackendKind.OpenAi;
 
+    /// <summary>Core keeps <c>my.server.info</c> and <c>my.grid.locate</c>; the Grid Backups ones are the
+    /// plugin's.</summary>
+    public static string PluginOf(string id) =>
+        id is "my.server.info" or "my.grid.locate"
+            ? "quasar.core"
+            : AssistantServiceCollectionExtensions.PluginId;
+
     public static TestOperation PlayerRead(string id, Func<JsonElement, object?>? handler = null) =>
         new(
             id,
             new QuasarOperationMetadata { Effect = QuasarOperationEffect.Read, Area = "my" },
-            policies: [QuasarPolicyNames.CanActAsPlayer]
+            policies: [QuasarPolicyNames.CanActAsPlayer],
+            pluginId: PluginOf(id)
         )
         {
             Handler = handler ?? (_ => new { ok = true }),
@@ -30,10 +38,13 @@ public sealed class PlayerTests
                 _ => new { grids = new[] { new { gridId = 42, name = "Miner" } } }
             ),
             PlayerRead("my.server.info"),
+            // Grid Backups answers, so a restore that needs an admin becomes a proposal.
+            PlayerRead("my.grid.backups"),
             new TestOperation(
                 "my.grid.restore",
                 new QuasarOperationMetadata { Effect = QuasarOperationEffect.Change, Area = "my" },
-                policies: [QuasarPolicyNames.CanActAsPlayer]
+                policies: [QuasarPolicyNames.CanActAsPlayer],
+                pluginId: AssistantServiceCollectionExtensions.PluginId
             ),
             TestOperation.Read("servers.status"),
         ];
@@ -65,7 +76,7 @@ public sealed class PlayerTests
 
         await harness.Players.HandleAsync(ask.Game("Where is my ship?"), default);
 
-        Assert.Equal([PlayerRequestHandler.NotEnabled], ask.Replies);
+        Assert.Equal([AskCommand.NotEnabled], ask.Replies);
         Assert.Empty(harness.Server.Requests);
     }
 
@@ -219,7 +230,7 @@ public sealed class PlayerTests
         Assert.Equal("C", ask.Replies[4]);
 
         harness.Configure(s => s with { Player = s.Player with { PrivacyNotice = "Custom." } });
-        Assert.Equal("Custom.", PlayerRequestHandler.PrivacyNotice(harness.Settings.Current));
+        Assert.Equal("Custom.", AskCommand.PrivacyNotice(harness.Settings.Current));
     }
 
     [Fact]
@@ -288,7 +299,7 @@ public sealed class PlayerTests
 
         await harness.Players.HandleAsync(ask.Game("Where is my ship?"), default);
 
-        Assert.Equal(PlayerRequestHandler.Unavailable, ask.Replies[^1]);
+        Assert.Equal(AskCommand.Unavailable, ask.Replies[^1]);
         var handover = Assert.Single(harness.Services.GetRequiredService<HandoverStore>().Open);
         Assert.Contains("backends-failed", handover.Reason);
         Assert.Equal("steam:76561198000000001", handover.PlayerKey);
@@ -317,7 +328,7 @@ public sealed class PlayerTests
             ask.Game("2") with
             {
                 Source = new(
-                    global::Quasar.Plugin.Abstractions.Assistant.QuasarRequestChannel.Game,
+                    global::Quasar.Plugin.Abstractions.Commands.QuasarChatChannel.Game,
                     "alpha",
                     "node-2"
                 ),
