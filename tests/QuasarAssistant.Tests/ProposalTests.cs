@@ -1,6 +1,6 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.Extensions.DependencyInjection;
-using Quasar.Plugin.Abstractions.Assistant;
+using Quasar.Plugin.Abstractions.Notifications;
 using Quasar.Plugin.Abstractions.Operations;
 using Quasar.Plugin.Abstractions.Security;
 using QuasarAssistant.Agent;
@@ -166,27 +166,31 @@ public sealed class ProposalTests
         await using var harness = await Harness.StartAsync([]);
         var service = harness.Services.GetRequiredService<ProposalService>();
         var authorization = harness.Services.GetRequiredService<IAuthorizationService>();
+        // The plugin's own restore.
         var player = new Proposal
         {
             Id = "p",
             ConversationId = "c",
             AskerSubject = "steam:1",
-            PluginId = "quasar.core",
+            PluginId = AssistantServiceCollectionExtensions.PluginId,
             OperationId = "my.grid.restore",
         };
-        // Unknown to this harness: nobody sees the buttons.
-        Assert.False(await service.CanApproveAsync(Harness.Person(), authorization, player));
-
-        await using var withOperation = await Harness.StartAsync([
-            new TestOperation("my.grid.restore", policies: [QuasarPolicyNames.CanActAsPlayer]),
-        ]);
-        service = withOperation.Services.GetRequiredService<ProposalService>();
-        authorization = withOperation.Services.GetRequiredService<IAuthorizationService>();
         Assert.True(
             await service.CanApproveAsync(Harness.Person(role: "editor"), authorization, player)
         );
         Assert.False(
             await service.CanApproveAsync(Harness.Person(role: "viewer"), authorization, player)
+        );
+        // An unknown operation: nobody sees the buttons.
+        Assert.False(
+            await service.CanApproveAsync(
+                Harness.Person(),
+                authorization,
+                player with
+                {
+                    OperationId = "my.unknown",
+                }
+            )
         );
     }
 }

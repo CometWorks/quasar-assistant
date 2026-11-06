@@ -1,5 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
-using Quasar.Plugin.Abstractions.Assistant;
+using Quasar.Plugin.Abstractions.Commands;
 using QuasarAssistant.Llm;
 using QuasarAssistant.Players;
 using QuasarAssistant.Settings;
@@ -11,20 +11,26 @@ public sealed class DiscordAdminTests
 {
     private const BackendKind Kind = BackendKind.OpenAi;
 
-    public static DiscordAdminHandler Handler(Harness harness) =>
-        (DiscordAdminHandler)harness.Services.GetRequiredService<IQuasarAdminRequestHandler>();
+    public static AssistantCommand Handler(Harness harness) =>
+        harness.Services.GetRequiredService<AssistantCommand>();
 
-    public static (QuasarAdminRequest Request, List<string> Replies) Ask(
+    public static (QuasarChatCommandRequest Request, List<string> Replies) Ask(
         string text,
         string channel = "admins"
     )
     {
         List<string> replies = [];
         return (
-            new QuasarAdminRequest(
+            new QuasarChatCommandRequest(
+                "assistant",
                 Harness.Person(),
-                channel,
+                "discord:7",
                 text,
+                new QuasarChatCommandSource(
+                    QuasarChatChannel.Discord,
+                    DiscordUserId: "7",
+                    DiscordChannelId: channel
+                ),
                 (reply, _) =>
                 {
                     replies.Add(reply);
@@ -60,7 +66,7 @@ public sealed class DiscordAdminTests
 
         await Handler(harness).HandleAsync(request, default);
 
-        Assert.Equal([DiscordAdminHandler.WrongChannel], replies);
+        Assert.Equal([AssistantCommand.WrongChannel], replies);
         Assert.Empty(harness.Server.Requests);
     }
 

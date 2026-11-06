@@ -1,7 +1,7 @@
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.Extensions.DependencyInjection;
-using Quasar.Plugin.Abstractions.Assistant;
+using Quasar.Plugin.Abstractions.Notifications;
 using Quasar.Plugin.Abstractions.Security;
 using QuasarAssistant.Monitoring;
 using QuasarAssistant.Settings;

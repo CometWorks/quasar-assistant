@@ -11,7 +11,7 @@ namespace QuasarAssistant.Quasar;
 
 public sealed class AssistantQuasarPlugin : IQuasarPlugin
 {
-    public string Id => "quasar.assistant";
+    public string Id => AssistantServiceCollectionExtensions.PluginId;
 
     public string DisplayName => "Assistant";
 
@@ -20,8 +20,8 @@ public sealed class AssistantQuasarPlugin : IQuasarPlugin
             Path.Combine(context.InstallDirectory, "plugin-data", context.PluginId)
         );
 
-    // No endpoints. The only operations are the MCP calls, registered with the services: nothing an operation
-    // or agent could call reaches the settings.
+    // No endpoints. The only operations are the MCP calls and the player's Grid Backups ones, registered with
+    // the services: nothing an operation or agent could call reaches the settings.
     public void ConfigureEndpoints(IEndpointRouteBuilder endpoints, QuasarPluginContext context) { }
 
     public IEnumerable<Assembly> GetRazorAssemblies()
