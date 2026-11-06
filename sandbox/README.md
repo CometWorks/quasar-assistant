@@ -1,6 +1,6 @@
 # Quasar Sandbox
 
-An optional MCP server that runs Python or C# for the assistant, with no network. Admins add it as a remote MCP server to a role, and the role's agent can then compute, convert or check things in code: parse a log excerpt, total up a CSV, test a regular expression.
+An optional MCP server that runs Python or C# for the assistant, with no network. Admins set it up once, turn it on per role, and the role's agent can then compute, convert or check things in code: parse a log excerpt, total up a CSV, test a regular expression.
 
 It is a separate program, not part of the plugin, and runs on Linux only.
 
@@ -48,12 +48,7 @@ Quasar on Windows can use a sandbox on a Linux machine or VM over HTTP.
 
 ## In the assistant
 
-On the assistant settings page, add an MCP server to the admin assistant or the player agent:
-
-- **URL:** `http://127.0.0.1:8765/mcp`
-- **Header:** `Authorization: Bearer <token>`
-
-Mark `run_code` and `read_file` read-only. Otherwise every run becomes a proposal an admin has to approve. A run can't change anything in Quasar or reach the network; it only changes its own workspace.
+On the assistant settings page under **Code execution**, set the URL, such as `http://127.0.0.1:8765/mcp`, and the token. Each role then gets the sandbox as the MCP server `sandbox` when its **Code execution** switch is on. The switch is on for the admin assistant and the monitor and off for the player agent by default. The two tools follow the role's read mode, because a run can't change anything in Quasar or reach the network; it only changes its own workspace.
 
 ## Testing
 

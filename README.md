@@ -37,10 +37,14 @@ admins set up. No provider or model ships with it.
   book only when the admins allow it.
 - **MCP servers.** Each role can have remote MCP servers (streamable HTTP; no local servers). Their tools
   appear as `mcp_<server>_<tool>`. Every call goes through a Quasar operation, so it is checked and audited:
-  `quasar.assistant/mcp.read` and `mcp.call` for the admin assistant (server control by default), and
-  `mcp.player.read` and `mcp.player.call` for the player agent (`CanActAsPlayer`, which only the player agent
-  meets). Each handler accepts only its own role's agent. Tools the admins mark read-only follow the read mode;
-  any other MCP tool is always a proposal and can't be undone.
+  `quasar.assistant/mcp.read` and `mcp.call` for the admin assistant and `mcp.monitor.read` and `mcp.monitor.call`
+  for the monitor (server control by default), and `mcp.player.read` and `mcp.player.call` for the player agent
+  (`CanActAsPlayer`, which only the player agent meets). Each handler accepts only its own role's agent. Tools
+  the admins mark read-only follow the read mode; any other MCP tool is always a proposal and can't be undone.
+- **Code execution.** With the optional [Quasar Sandbox](sandbox/README.md) set up, a role can run Python and
+  C# with no network as the MCP server `sandbox`. Each role has a switch for it: on for the admin assistant and
+  the monitor, off for the player agent by default. Its two tools only change the sandbox's own workspace, so
+  they follow the read mode, and its token is stored encrypted like the API keys.
 - **Data.** Tool results have passwords, tokens and keys replaced by `<redacted>` and are cut to 16 KiB.
   Conversations are kept per person and deleted 30 days after their last message.
 - **Caching.** Every request of a role starts with the same bytes: the system prompt, the admins' notes and
@@ -125,9 +129,9 @@ use `/ask`. New proposals and hand-overs can be posted to the admin channel with
 | `/assistant/chat` | `CanUseAssistant` | Your conversations and a full-size chat. |
 | `/assistant/approvals` | `CanUseAssistant` | Players waiting for an admin, pending and decided proposals. Marking a hand-over handled needs `CanControlServers`. |
 | `/assistant/monitor` | `CanUseAssistant` | The monitor's open and resolved incidents, each run's answer, tokens and cost, and the budget. |
-| `/assistant/settings` | `CanManageSecurity` | Backends, their API keys and prices; per role the backend order, modes, limits, MCP servers and skills; player support and restore rules; the monitor's checks, script and budget; notifications, Discord and usage. |
+| `/assistant/settings` | `CanManageSecurity` | Backends, their API keys and prices; per role the backend order, modes, limits, code execution, MCP servers and skills; the sandbox's URL and token; player support and restore rules; the monitor's checks, script and budget; notifications, Discord and usage. |
 
-The plugin registers no endpoints and only the four MCP operations, which accept nothing but the assistant's
+The plugin registers no endpoints and only the six MCP operations, which accept nothing but the assistant's
 own agents. Nothing an agent or a script can call reaches its settings.
 
 ## Data folder
@@ -138,7 +142,7 @@ Everything lives in `plugin-data/quasar.assistant/` in the Quasar data folder:
 |---|---|
 | `settings.json` | Backends (without keys), roles, modes, limits. |
 | `keys.json` | API keys, encrypted with Quasar's Data Protection keys. A saved key is never shown again. |
-| `mcp-headers.json` | The MCP servers' extra headers, encrypted the same way. |
+| `mcp-headers.json` | The MCP servers' extra headers and the sandbox token, encrypted the same way. |
 | `conversations/<asker>/<id>.json` | One file per conversation. |
 | `proposals.json` | The plugin's proposal records; Quasar's audit log holds the proposals themselves. |
 | `handovers.json` | Players handed to the admins. |
@@ -175,8 +179,8 @@ settings page, then `smoke.py ask` puts 8 player and 5 admin questions to it. It
 comes back, a deleted one and a kick only become proposals, and an injected grid name moves nothing, and writes
 the answers with the tokens and cache hits of each run to `smoke.md`.
 
-`sandbox/` holds the optional Quasar Sandbox, an MCP server that runs Python or C# with no network for a role
-that has it set up. It runs on Linux only; see [its README](sandbox/README.md). The plugin sends each MCP call's
+`sandbox/` holds the optional Quasar Sandbox, an MCP server that runs Python or C# with no network for the roles
+with code execution on. It runs on Linux only; see [its README](sandbox/README.md). The plugin sends each MCP call's
 conversation as `_meta` `quasar.assistant/conversation`, so the sandbox keeps a workspace per conversation.
 
 `scripts/refresh-quasar-book.sh [commit]` refreshes the shipped Quasar book from a commit of the Quasar

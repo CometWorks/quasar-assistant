@@ -104,7 +104,14 @@ public sealed partial class ToolCatalog(
     public static IEnumerable<QuasarOperation> OfRole(
         IEnumerable<QuasarOperation> available,
         string roleName
-    ) => available.Where(op => IsPlayerOperation(op) == (roleName == AssistantRoles.Player));
+    ) =>
+        available.Where(op =>
+            op.PluginId == McpRegistry.PluginId
+                // Each role's own pair of MCP operations only.
+                ? op.OperationId == McpRegistry.ReadOperation(roleName)
+                    || op.OperationId == McpRegistry.CallOperation(roleName)
+                : IsPlayerOperation(op) == (roleName == AssistantRoles.Player)
+        );
 
     /// <param name="canAct">False for a player without an agent principal (Discord without a link): no
     /// operation or MCP tools then.</param>

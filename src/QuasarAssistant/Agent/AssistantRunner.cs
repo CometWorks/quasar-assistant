@@ -142,7 +142,7 @@ public sealed class AssistantRunner(
     private async Task<RunResult> RunAsync(Conversation conversation, AskRequest ask, Run run)
     {
         var current = settings.Current;
-        var role = current.Role(conversation.Role);
+        var role = settings.EffectiveRole(conversation.Role);
         var backends = current.BackendsOf(conversation.Role);
         var clock = Stopwatch.StartNew();
         var record = new RunMetrics { Time = time.GetUtcNow(), Role = conversation.Role };

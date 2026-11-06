@@ -23,7 +23,7 @@ public sealed class SettingsFormTests
     [Fact]
     public void RoleFormChecksTheMcpServers()
     {
-        var form = RoleForm.From(new RoleSettings());
+        var form = RoleForm.From(new RoleSettings(), AssistantRoles.Admin);
         form.McpServers.Add(new McpServerForm { Name = "ops", Url = "https://mcp.example/mcp" });
         Assert.Null(form.Validate());
 

@@ -18,6 +18,7 @@ public sealed class SettingsStore
     private AssistantSettings _settings;
     private Dictionary<string, string> _keys;
     private Dictionary<string, string> _mcpHeaders;
+    private Dictionary<string, RoleSettings> _effective = [];
 
     public SettingsStore(AssistantPaths paths, IDataProtectionProvider protection)
     {
@@ -47,6 +48,7 @@ public sealed class SettingsStore
         {
             JsonFiles.Write(_settingsPath, settings);
             _settings = settings;
+            _effective = [];
             // A removed backend takes its key along.
             var names = settings.Backends.Select(backend => backend.Name).ToHashSet();
             if (_keys.Keys.Any(name => !names.Contains(name)))
@@ -56,6 +58,7 @@ public sealed class SettingsStore
                 .All.SelectMany(role =>
                     settings.Role(role).McpServers.Select(server => McpKey(role, server.Name))
                 )
+                .Append(SandboxKey)
                 .ToHashSet();
             if (_mcpHeaders.Keys.Any(key => !servers.Contains(key)))
                 SaveMcpHeaders(
@@ -64,6 +67,30 @@ public sealed class SettingsStore
         }
         Changed?.Invoke();
     }
+
+    /// <summary>The role as its agent runs, the same instance until the settings change, so the tool sets built
+    /// from it stay cached.</summary>
+    public RoleSettings EffectiveRole(string name)
+    {
+        lock (_lock)
+        {
+            if (!_effective.TryGetValue(name, out var role))
+                _effective[name] = role = _settings.EffectiveRole(name);
+            return role;
+        }
+    }
+
+    public bool HasSandboxToken => McpHeaders("*", SandboxSettings.ServerName).Count > 0;
+
+    /// <summary>Null or empty removes the token.</summary>
+    public void SetSandboxToken(string? token) =>
+        SetMcpHeaders(
+            "*",
+            SandboxSettings.ServerName,
+            string.IsNullOrEmpty(token)
+                ? new Dictionary<string, string>()
+                : new Dictionary<string, string> { ["Authorization"] = "Bearer " + token }
+        );
 
     public bool HasApiKey(string backend)
     {
@@ -128,9 +155,11 @@ public sealed class SettingsStore
         }
     }
 
-    /// <summary>For the MCP client only.</summary>
+    /// <summary>For the MCP client only. The sandbox's are the same for every role.</summary>
     internal IReadOnlyDictionary<string, string> McpHeaders(string role, string server)
     {
+        if (server == SandboxSettings.ServerName)
+            role = "*";
         lock (_lock)
             return _mcpHeaders.TryGetValue(McpKey(role, server), out var value)
                 ? System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, string>>(
@@ -140,6 +169,8 @@ public sealed class SettingsStore
     }
 
     private static string McpKey(string role, string server) => role + "/" + server;
+
+    private static readonly string SandboxKey = McpKey("*", SandboxSettings.ServerName);
 
     private void SaveMcpHeaders(Dictionary<string, string> headers)
     {

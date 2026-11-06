@@ -71,8 +71,8 @@ public static class AssistantServiceCollectionExtensions
 
     /// <summary>
     /// MCP calls go through core so they are checked and audited like any operation. Each role has its own pair:
-    /// the admin assistant's under server control, the player agent's under <c>CanActAsPlayer</c>, which only the
-    /// player agent meets. A handler accepts only its role's agent, for a server and tool set up for that role.
+    /// the admin assistant's and the monitor's under server control, the player agent's under
+    /// <c>CanActAsPlayer</c>, which only the player agent meets. A handler accepts only its role's agent, for a server and tool set up for that role.
     /// An acting MCP tool can't be undone, so it is always a proposal.
     /// </summary>
     private static void AddMcpOperations(IServiceCollection services)
@@ -88,6 +88,12 @@ public static class AssistantServiceCollectionExtensions
             AssistantRoles.Player,
             QuasarPolicyNames.CanActAsPlayer,
             "the player support settings"
+        );
+        AddMcpOperations(
+            services,
+            AssistantRoles.Monitor,
+            QuasarPolicyNames.CanControlServers,
+            "the monitor's settings"
         );
     }
 

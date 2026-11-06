@@ -12,10 +12,12 @@ public sealed class RoleForm
     public int QueueWaitSeconds { get; set; }
     public int RunDeadlineSeconds { get; set; }
     public int MaxTurns { get; set; }
+    public bool CodeExecution { get; set; }
 
-    public static RoleForm From(RoleSettings role) =>
+    public static RoleForm From(RoleSettings role, string name) =>
         new()
         {
+            CodeExecution = role.CodeExecution ?? RoleSettings.CodeExecutionByDefault(name),
             Backends = [.. role.Backends],
             RoleText = role.RoleText,
             AreaModes = new(role.AreaModes),
@@ -39,6 +41,7 @@ public sealed class RoleForm
             QueueWaitSeconds = Math.Max(1, QueueWaitSeconds),
             RunDeadlineSeconds = Math.Max(10, RunDeadlineSeconds),
             MaxTurns = Math.Max(1, MaxTurns),
+            CodeExecution = CodeExecution,
         };
 
     public string? Validate()
@@ -54,6 +57,8 @@ public sealed class RoleForm
             return "An MCP server name is 1 to 32 letters, digits, - or _.";
         if (names.Distinct().Count() != names.Count)
             return "Two MCP servers have the same name.";
+        if (names.Contains(SandboxSettings.ServerName))
+            return $"The MCP server name {SandboxSettings.ServerName} is kept for code execution.";
         if (
             McpServers.Any(server =>
                 !Uri.TryCreate(server.Url.Trim(), UriKind.Absolute, out var url)

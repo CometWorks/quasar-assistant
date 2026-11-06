@@ -95,10 +95,10 @@
     </div>
 </details>
 
-@if (Role != AssistantRoles.Monitor)
-{
-    <McpEditor Role="@Role" Servers="Form.McpServers" />
-}
+<h3>Code execution</h3>
+<label class="assistant-check"><input type="checkbox" @bind="Form.CodeExecution" /> Let the @Label run Python and C# in the sandbox (<code>run_code</code>, <code>read_file</code>), when the sandbox is set up under Code execution</label>
+
+<McpEditor Role="@Role" Servers="Form.McpServers" />
 
 @code {
     [Parameter, EditorRequired] public RoleForm Form { get; set; } = null!;

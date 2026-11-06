@@ -49,6 +49,12 @@ public sealed record RoleSettings
     public int RunDeadlineSeconds { get; init; } = 300;
     public int MaxTurns { get; init; } = 20;
 
+    /// <summary>Whether the role gets the code-execution sandbox as an MCP server; null: the role's default, on
+    /// for the admin assistant and the monitor, off for the player agent.</summary>
+    public bool? CodeExecution { get; init; }
+
+    public static bool CodeExecutionByDefault(string role) => role != AssistantRoles.Player;
+
     /// <summary>The settings of a role nobody has saved yet.</summary>
     public static RoleSettings DefaultFor(string role) =>
         role switch
@@ -70,6 +76,19 @@ public sealed record McpServerSettings
     /// <summary>The tools the admin marked read-only. Only these follow the read mode; every other tool of
     /// the server is always a proposal.</summary>
     public List<string> ReadOnlyTools { get; init; } = [];
+}
+
+/// <summary>The Quasar Sandbox, an MCP server that runs Python and C# without network. Its token is stored apart,
+/// encrypted. The roles with code execution on get it as the MCP server <c>sandbox</c>.</summary>
+public sealed record SandboxSettings
+{
+    public const string ServerName = "sandbox";
+
+    /// <summary>Its tools only change the sandbox's own workspace, so they follow the read mode.</summary>
+    public static readonly IReadOnlyList<string> Tools = ["run_code", "read_file"];
+
+    /// <summary>Such as http://127.0.0.1:8765/mcp. Empty: no code execution for any role.</summary>
+    public string Url { get; init; } = "";
 }
 
 public sealed record NotificationSettings
@@ -206,6 +225,7 @@ public sealed record AssistantSettings
     public DiscordSettings Discord { get; init; } = new();
     public PlayerSupportSettings Player { get; init; } = new();
     public MonitorSettings Monitor { get; init; } = new();
+    public SandboxSettings Sandbox { get; init; } = new();
 
     public RoleSettings Role(string role) =>
         Roles.GetValueOrDefault(role) ?? RoleSettings.DefaultFor(role);
@@ -216,6 +236,30 @@ public sealed record AssistantSettings
             .Backends.Select(name => Backends.FirstOrDefault(backend => backend.Name == name))
             .OfType<BackendSettings>()
             .ToList();
+
+    /// <summary>The role as its agent runs: its own MCP servers and, with code execution on, the sandbox.</summary>
+    public RoleSettings EffectiveRole(string name)
+    {
+        var role = Role(name);
+        if (
+            Sandbox.Url.Trim().Length == 0
+            || !(role.CodeExecution ?? RoleSettings.CodeExecutionByDefault(name))
+        )
+            return role;
+        return role with
+        {
+            McpServers =
+            [
+                .. role.McpServers.Where(server => server.Name != SandboxSettings.ServerName),
+                new()
+                {
+                    Name = SandboxSettings.ServerName,
+                    Url = Sandbox.Url.Trim(),
+                    ReadOnlyTools = [.. SandboxSettings.Tools],
+                },
+            ],
+        };
+    }
 
     public AssistantSettings WithRole(string name, RoleSettings role) =>
         this with

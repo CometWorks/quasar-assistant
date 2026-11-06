@@ -23,13 +23,32 @@ public sealed class McpRegistry
 {
     public const string PluginId = "quasar.assistant";
 
-    /// <summary><c>mcp.read</c> for the admin assistant, <c>mcp.player.read</c> for the player agent.</summary>
+    /// <summary><c>mcp.read</c> for the admin assistant, <c>mcp.player.read</c> for the player agent and
+    /// <c>mcp.monitor.read</c> for the monitor.</summary>
     public static string ReadOperation(string role) =>
-        role == AssistantRoles.Player ? "mcp.player.read" : "mcp.read";
+        role switch
+        {
+            AssistantRoles.Player => "mcp.player.read",
+            AssistantRoles.Monitor => "mcp.monitor.read",
+            _ => "mcp.read",
+        };
 
-    /// <summary><c>mcp.call</c> for the admin assistant, <c>mcp.player.call</c> for the player agent.</summary>
+    /// <summary><c>mcp.call</c>, <c>mcp.player.call</c> or <c>mcp.monitor.call</c>, by role.</summary>
     public static string CallOperation(string role) =>
-        role == AssistantRoles.Player ? "mcp.player.call" : "mcp.call";
+        role switch
+        {
+            AssistantRoles.Player => "mcp.player.call",
+            AssistantRoles.Monitor => "mcp.monitor.call",
+            _ => "mcp.call",
+        };
+
+    public static QuasarAgentKind KindOf(string role) =>
+        role switch
+        {
+            AssistantRoles.Player => QuasarAgentKind.Player,
+            AssistantRoles.Monitor => QuasarAgentKind.Monitor,
+            _ => QuasarAgentKind.Assistant,
+        };
 
     private static readonly TimeSpan ListTimeout = TimeSpan.FromSeconds(30);
 
@@ -75,7 +94,9 @@ public sealed class McpRegistry
             foreach (var role in AssistantRoles.All)
             {
                 List<McpTool> list = [];
-                foreach (var server in settings.Role(role).McpServers.Where(s => s.Enabled))
+                foreach (
+                    var server in _settings.EffectiveRole(role).McpServers.Where(s => s.Enabled)
+                )
                 {
                     var key = role + "/" + server.Name;
                     try
@@ -139,18 +160,19 @@ public sealed class McpRegistry
         CancellationToken token
     )
     {
-        var kind =
-            role == AssistantRoles.Player ? QuasarAgentKind.Player : QuasarAgentKind.Assistant;
-        if (!user.IsQuasarAgent(out var agent) || agent.Kind != kind)
+        if (!user.IsQuasarAgent(out var agent) || agent.Kind != KindOf(role))
             throw new QuasarOperationException(
                 403,
-                role == AssistantRoles.Player
-                    ? "Only the player agent calls the player's MCP tools."
-                    : "Only the admin assistant calls the admins' MCP tools."
+                role switch
+                {
+                    AssistantRoles.Player => "Only the player agent calls the player's MCP tools.",
+                    AssistantRoles.Monitor => "Only the monitor calls the monitor's MCP tools.",
+                    _ => "Only the admin assistant calls the admins' MCP tools.",
+                }
             );
         var server =
             _settings
-                .Current.Role(role)
+                .EffectiveRole(role)
                 .McpServers.FirstOrDefault(s => s.Enabled && s.Name == request.Server)
             ?? throw new QuasarOperationException(
                 403,
