@@ -135,6 +135,18 @@ dotnet test tests/QuasarAssistant.Tests
 The tests run the agent loop against an in-process stub server that speaks both streaming formats, and a stub
 MCP server, with fake Quasar services. They never call a real model.
 
+`tests/rig/` is the end-to-end test. `deploy.sh [user@host] [--keep]` builds Quasar and this plugin, copies
+them and the Grid Backups working copy to a test host and starts `rig.py` there. It runs a dedicated server, a
+headless game client, an isolated Quasar and a scripted stub model, and prints PASS or FAIL for seven steps:
+`!ask`, an automatic restore, a proposal and its approval, an undo, the admin drawer, the cached prefix and a
+grid name carrying an injection.
+
+`smoke.py` asks a real model, by hand before a release. On a setup left running with `--keep`,
+`smoke.py configure` turns the stub backend into a real one without a key. Someone pastes the key on the
+settings page, then `smoke.py ask` puts 8 player and 5 admin questions to it. It checks that a destroyed grid
+comes back, a deleted one and a kick only become proposals, and an injected grid name moves nothing, and writes
+the answers with the tokens and cache hits of each run to `smoke.md`.
+
 `scripts/refresh-quasar-book.sh [commit]` refreshes the shipped Quasar book from a commit of the Quasar
 repository and records it in `src/QuasarAssistant/QuasarBook/COMMIT`.
 
