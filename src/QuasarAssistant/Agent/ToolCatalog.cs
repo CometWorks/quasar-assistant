@@ -63,7 +63,8 @@ public sealed partial class ToolCatalog(
     ILogger<ToolCatalog> logger
 )
 {
-    public const string RestoreKey = "quasar.core/my.grid.restore";
+    public const string RestoreKey =
+        AssistantServiceCollectionExtensions.PluginId + "/my.grid.restore";
     private const string CorePluginId = "quasar.core";
 
     private static readonly JsonSerializerOptions SchemaOptions = new(JsonSerializerDefaults.Web)
@@ -169,7 +170,7 @@ public sealed partial class ToolCatalog(
         {
             foreach (var operation in OfRole(available, roleName))
             {
-                if (operation.PluginId == McpRegistry.PluginId)
+                if (Area(operation) == "mcp" && operation.PluginId == McpRegistry.PluginId)
                     continue; // Offered as the MCP servers' own tools below.
                 var mode = EffectiveMode(operation, role);
                 if (!IsOffered(operation, mode))
@@ -183,8 +184,14 @@ public sealed partial class ToolCatalog(
                     tools.Add((restore, RestoreDescription(mode), RestoreSchema));
                     continue;
                 }
+                // The player's own operations, core's and the plugin's Grid Backups ones, go by their short name.
+                var shortName =
+                    player
+                    && operation.PluginId
+                        is CorePluginId
+                            or AssistantServiceCollectionExtensions.PluginId;
                 var tool = new AgentTool(
-                    player && operation.PluginId == CorePluginId
+                    shortName
                         ? Shorten(NotAllowed().Replace(operation.OperationId, "_"), operation.Key)
                         : ToolName(operation),
                     ToolKind.Operation,

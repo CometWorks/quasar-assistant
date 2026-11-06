@@ -1,7 +1,7 @@
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.Extensions.DependencyInjection;
-using Quasar.Plugin.Abstractions.Assistant;
+using Quasar.Plugin.Abstractions.Commands;
 using Quasar.Plugin.Abstractions.Security;
 using QuasarAssistant.Agent;
 using QuasarAssistant.Settings;
@@ -10,29 +10,44 @@ using QuasarAssistant.Storage;
 namespace QuasarAssistant.Players;
 
 /// <summary>
-/// Answers <c>/assistant</c> on Discord, only in the admin channel set in the settings. The admin assistant runs
-/// for the asker with read and propose only: every change becomes a proposal, whatever the mode, and approvals
-/// stay in the web UI (R5).
+/// The admin command <c>/assistant</c> on Discord, answered only in the admin channel set in the settings. The
+/// admin assistant runs for the asker with read and propose only: every change becomes a proposal, whatever the
+/// mode, and approvals stay in the web UI (R5).
 /// </summary>
-public sealed class DiscordAdminHandler(
+public sealed class AssistantCommand(
     SettingsStore settings,
     ConversationStore conversations,
     AssistantRunner runner,
     AdminNotifier notifier,
     IServiceScopeFactory scopes,
     TimeProvider time
-) : IQuasarAdminRequestHandler
+) : IQuasarChatCommand
 {
+    public QuasarChatCommandInfo Info { get; } =
+        new(
+            "assistant",
+            "Ask the admin assistant (mapped Quasar admins only).",
+            "question",
+            "Your question",
+            QuasarChatCommandScope.Admin
+        );
+
     public const string WrongChannel =
         "The assistant answers only in the admin channel set in its settings.";
     public const string NotAllowed = "You are not allowed to use the assistant.";
 
-    public async Task HandleAsync(QuasarAdminRequest request, CancellationToken token)
+    public async Task HandleAsync(QuasarChatCommandRequest request, CancellationToken token)
     {
         var channel = settings.Current.Discord.AdminChannelId.Trim();
-        if (channel.Length == 0 || request.ChannelId != channel)
+        if (channel.Length == 0 || request.Source.DiscordChannelId != channel)
         {
             await request.ReplyAsync(WrongChannel, token);
+            return;
+        }
+        // Core always names the mapped person for an admin command.
+        if (request.Caller is not { } asker)
+        {
+            await request.ReplyAsync(NotAllowed, token);
             return;
         }
         await using (var scope = scopes.CreateAsyncScope())
@@ -41,7 +56,7 @@ public sealed class DiscordAdminHandler(
             if (
                 !(
                     await authorization.AuthorizeAsync(
-                        request.Asker,
+                        asker,
                         null,
                         QuasarPolicyNames.CanUseAssistant
                     )
@@ -53,8 +68,8 @@ public sealed class DiscordAdminHandler(
             }
         }
 
-        var subject = request.Asker.FindFirstValue(ClaimTypes.NameIdentifier) ?? "";
-        var name = request.Asker.Identity?.Name ?? subject;
+        var subject = asker.FindFirstValue(ClaimTypes.NameIdentifier) ?? "";
+        var name = asker.Identity?.Name ?? subject;
         var conversation = conversations.Keyed(
             subject,
             name,
@@ -70,7 +85,7 @@ public sealed class DiscordAdminHandler(
             ]
         )
         {
-            Asker = request.Asker,
+            Asker = asker,
             ProposeOnly = true,
         };
         var before = conversation.Messages.Count;

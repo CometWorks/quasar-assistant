@@ -23,8 +23,10 @@ public sealed class GridRestores(
     TimeProvider time
 )
 {
-    private const string LossesKey = "quasar.core/my.grid.losses";
-    private const string BackupsKey = "quasar.core/my.grid.backups";
+    private const string LossesKey =
+        AssistantServiceCollectionExtensions.PluginId + "/my.grid.losses";
+    private const string BackupsKey =
+        AssistantServiceCollectionExtensions.PluginId + "/my.grid.backups";
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
     private readonly IReadOnlyList<QuasarOperation> _operations = operations.ToList();
 

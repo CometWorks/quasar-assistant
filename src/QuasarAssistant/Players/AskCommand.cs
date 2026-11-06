@@ -1,4 +1,4 @@
-using Quasar.Plugin.Abstractions.Assistant;
+using Quasar.Plugin.Abstractions.Commands;
 using Quasar.Plugin.Abstractions.Security;
 using QuasarAssistant.Agent;
 using QuasarAssistant.Settings;
@@ -7,12 +7,12 @@ using QuasarAssistant.Storage;
 namespace QuasarAssistant.Players;
 
 /// <summary>
-/// Answers players: <c>!ask</c> in game and <c>/ask</c> on Discord. In order, and no model runs before the last
-/// step: off → a fixed reply; the decisions on their proposals since the last request; over a limit → a fixed
-/// reply; the privacy notice on the first request and monthly;
-/// then the player agent runs in the player pool and its answer is whispered or posted.
+/// The player command <c>ask</c>: <c>!ask</c> in game and <c>/ask</c> on Discord. In order, and no model runs
+/// before the last step: off → a fixed reply; the decisions on their proposals since the last request; over a
+/// limit → a fixed reply; the privacy notice on the first request and monthly; then the player agent runs in the
+/// player pool and its answer is whispered or posted.
 /// </summary>
-public sealed class PlayerRequestHandler(
+public sealed class AskCommand(
     SettingsStore settings,
     PlayerUsageStore usage,
     PlayerOutbox outbox,
@@ -20,14 +20,24 @@ public sealed class PlayerRequestHandler(
     AssistantRunner runner,
     HandoverService handovers,
     TimeProvider time
-) : IQuasarPlayerRequestHandler
+) : IQuasarChatCommand
 {
+    public QuasarChatCommandInfo Info { get; } =
+        new(
+            "ask",
+            "Ask the server's assistant.",
+            "question",
+            "Your question",
+            QuasarChatCommandScope.Player,
+            "Asking the assistant..."
+        );
+
     public const string NotEnabled = "The assistant isn't enabled on this server.";
     public const string Unavailable = "The assistant is unavailable right now. An admin was told.";
     public const string StillWorking =
         "The assistant is still working on your last question. Wait for its answer.";
 
-    public async Task HandleAsync(QuasarPlayerRequest request, CancellationToken token)
+    public async Task HandleAsync(QuasarChatCommandRequest request, CancellationToken token)
     {
         var current = settings.Current;
         var player = current.Player;
@@ -48,7 +58,7 @@ public sealed class PlayerRequestHandler(
             await request.ReplyAsync(PrivacyNotice(current), token);
 
         QuasarAgentIdentity? agent = null;
-        request.Player?.IsQuasarAgent(out agent);
+        request.Caller?.IsQuasarAgent(out agent);
         var name = agent?.PlayerName ?? "Discord user " + request.Source.DiscordUserId;
         var source = Source(request.Source);
         var conversation = conversations.Keyed(
@@ -59,7 +69,7 @@ public sealed class PlayerRequestHandler(
         );
         var ask = new AskRequest(request.Text, HostLines(agent, request, source))
         {
-            Agent = request.Player,
+            Agent = request.Caller,
             TryUseAction = () => usage.TryAction(request.ConversationKey, player.Limits),
             Source = source,
         };
@@ -110,7 +120,7 @@ public sealed class PlayerRequestHandler(
 
     private IReadOnlyList<string> HostLines(
         QuasarAgentIdentity? agent,
-        QuasarPlayerRequest request,
+        QuasarChatCommandRequest request,
         string source
     ) =>
         [
@@ -121,8 +131,8 @@ public sealed class PlayerRequestHandler(
             "asked: " + source,
         ];
 
-    private static string Source(QuasarPlayerRequestSource source) =>
-        source.Channel == QuasarRequestChannel.Discord ? "on Discord"
+    private static string Source(QuasarChatCommandSource source) =>
+        source.Channel == QuasarChatChannel.Discord ? "on Discord"
         : source.Node is { } node ? $"in game on {source.Server}, node {node}"
         : $"in game on {source.Server}";
 }

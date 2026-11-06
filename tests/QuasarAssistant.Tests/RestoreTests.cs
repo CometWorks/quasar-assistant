@@ -62,7 +62,8 @@ public sealed class RestoreTests
             new TestOperation(
                 "my.grid.restore",
                 new QuasarOperationMetadata { Effect = QuasarOperationEffect.Change, Area = "my" },
-                policies: [QuasarPolicyNames.CanActAsPlayer]
+                policies: [QuasarPolicyNames.CanActAsPlayer],
+                pluginId: AssistantServiceCollectionExtensions.PluginId
             )
             {
                 Handler = request => grid.Restore(request),

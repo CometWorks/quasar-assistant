@@ -29,6 +29,7 @@ public sealed class PlayerInjectionTests
                 _ => new { grids = new[] { new { gridId = 99L, name = Injected } } }
             ),
             PlayerTests.PlayerRead("my.server.info", _ => new { motd = Injected }),
+            PlayerTests.PlayerRead("my.grid.backups"),
             PlayerTests.PlayerRead(
                 "my.grid.losses",
                 _ => new
@@ -47,7 +48,8 @@ public sealed class PlayerInjectionTests
             new TestOperation(
                 "my.grid.restore",
                 new QuasarOperationMetadata { Effect = QuasarOperationEffect.Change, Area = "my" },
-                policies: [QuasarPolicyNames.CanActAsPlayer]
+                policies: [QuasarPolicyNames.CanActAsPlayer],
+                pluginId: AssistantServiceCollectionExtensions.PluginId
             )
             {
                 Handler = _ => new { status = "restored" },

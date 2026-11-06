@@ -46,11 +46,20 @@ admins set up. No provider or model ships with it.
 - **Caching.** Every request of a role starts with the same bytes: the system prompt, the admins' notes and
   the tools in name order. The time, the asker and the page go into the user turn as `[host]` lines, so the
   providers' prompt caches hit.
+- **Cost.** Quasar sets no spending limit for the admin assistant; set one at the model provider. In a test with
+  Claude Sonnet 5.5 on 2026-11-06, 13 questions (8 from a player in game, 5 from an admin) each took 3 to 8
+  seconds and 1 to 3 model calls. 87% of the input tokens were read from the cache, over 90% in most runs once it
+  was warm, and the 13 answers cost about USD 0.12 together. Long conversations and large log reads cost more.
 
 ## Player support
 
-Off until an admin turns it on. For each `!ask` or `/ask`, in this order, and without a model run before the
-last step:
+The plugin declares two chat commands: `ask` for players (`!ask` in game on every server, `/ask` on Discord)
+and `assistant` for admins (`/assistant` on Discord). Quasar carries them: it registers them in game and on
+Discord, authenticates the caller, runs `!link`, builds the player identity and delivers the replies. The
+plugin only answers.
+
+Player support is off until an admin turns it on. For each `!ask` or `/ask`, in this order, and without a
+model run before the last step:
 
 1. Off: the player is told the assistant isn't enabled.
 2. Limits: each player has up to 24 questions by default and starts with all of them. Each question uses one,
@@ -63,8 +72,12 @@ last step:
    modes allow, `ask_admin` and the skill tools. A Discord user without a link gets no `my.*` tools.
 5. The answer is whispered in game or posted on Discord.
 
-Quasar builds the player agent from the game session or the Discord link, and its `my.*` operations only
-reach that player's own things. Changes the player agent makes or proposes count against 3 actions a day.
+Quasar builds the player agent from the game session or the Discord link, and the `my.*` operations only
+reach that player's own things. Quasar provides `my.server.info` and `my.grid.locate`. The plugin provides
+the Grid Backups ones, `my.grids`, `my.grid.backups`, `my.grid.losses` and `my.grid.restore`, under its own ID
+(`quasar.assistant/my.grid.restore`). They talk to the Grid Backups plugin on the servers through Quasar's
+companion channel and ask Quasar which cluster node has the player, a grid or a position. Without a
+server name they use the one the player asked from. Changes the player agent makes or proposes count against 3 actions a day.
 When every backend fails, the player hears that the assistant is unavailable and the admins get a hand-over.
 When an admin approves or rejects one of the player's proposals, or it expires, the player is told at the
 start of their next request, before the model runs. Quasar can't message a player outside a request, so
@@ -184,7 +197,8 @@ repository and records it in `src/QuasarAssistant/QuasarBook/COMMIT`.
 src/QuasarAssistant/          services and Razor UI
   Llm/                        message model, the two API formats, the client, failover
   Agent/                      tools and modes, the run loop, proposals, restores, hand-overs, the prompts
-  Players/                    player requests, limits, Discord admin requests
+  Players/                    the ask and assistant commands, player limits
+  GridBackups/                the player's Grid Backups operations
   Monitoring/                 the monitor's checks, script, incidents and token budget
   Mcp/                        the MCP client and the servers' tools
   Skills/                     the Quasar book and the admins' skills

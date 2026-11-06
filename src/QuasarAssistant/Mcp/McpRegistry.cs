@@ -21,7 +21,7 @@ public sealed record McpServerStatus(DateTimeOffset Time, int Tools, string? Err
 /// </summary>
 public sealed class McpRegistry
 {
-    public const string PluginId = "quasar.assistant";
+    public const string PluginId = AssistantServiceCollectionExtensions.PluginId;
 
     /// <summary><c>mcp.read</c> for the admin assistant, <c>mcp.player.read</c> for the player agent.</summary>
     public static string ReadOperation(string role) =>
