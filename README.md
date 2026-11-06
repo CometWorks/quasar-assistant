@@ -52,8 +52,10 @@ Off until an admin turns it on. For each `!ask` or `/ask`, in this order, and wi
 last step:
 
 1. Off: the player is told the assistant isn't enabled.
-2. Limits: 10 requests an hour, 30 a day per player by default, counted by Steam ID (or Discord ID without a
-   link). Over a limit the player gets a fixed reply.
+2. Limits: each player has up to 24 questions by default and starts with all of them. Each question uses one,
+   and one comes back every hour, never more than 24. So a few questions in a row are fine, but not a steady
+   stream. They are counted by Steam ID (or Discord ID without a link), and the admins set the maximum, how many
+   come back and how often. A player with none left gets a fixed reply saying when the next one comes back.
 3. Privacy notice: on the first request and once a month, the admins' text (by default it names the
    providers of the player role's backends).
 4. The player agent runs in its own pool (2 at once, 60 s queue wait by default) with the `my.*` tools the
@@ -116,7 +118,7 @@ Everything lives in `plugin-data/quasar.assistant/` in the Quasar data folder:
 | `proposals.json` | The plugin's proposal records; Quasar's audit log holds the proposals themselves. |
 | `handovers.json` | Players handed to the admins. |
 | `player-outbox.json` | Decisions on players' proposals they haven't heard yet, kept as long as proposals. |
-| `player-usage.json` | Per player: request and action times of the last day, and when the privacy notice was sent. |
+| `player-usage.json` | Per player: questions left and the last refill, action times of the last day, and when the privacy notice was sent. |
 | `skills/admin/*.md`, `skills/player/*.md` | The admins' skills per role. |
 | `metrics.jsonl` | One line per run: role, backends, fallovers, failures, turns, tokens (cached and processed), duration. No message text. |
 
