@@ -173,7 +173,8 @@ public sealed class McpRegistry
                 _settings.McpHeaders(role, server.Name),
                 request.Tool,
                 request.Arguments is { } arguments ? JsonNode.Parse(arguments.GetRawText()) : null,
-                token
+                token,
+                agent.ConversationId
             );
         }
         catch (Exception error)

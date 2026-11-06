@@ -173,6 +173,10 @@ settings page, then `smoke.py ask` puts 8 player and 5 admin questions to it. It
 comes back, a deleted one and a kick only become proposals, and an injected grid name moves nothing, and writes
 the answers with the tokens and cache hits of each run to `smoke.md`.
 
+`sandbox/` holds the optional Quasar Sandbox, an MCP server that runs Python or C# with no network for a role
+that has it set up. It runs on Linux only; see [its README](sandbox/README.md). The plugin sends each MCP call's
+conversation as `_meta` `quasar.assistant/conversation`, so the sandbox keeps a workspace per conversation.
+
 `scripts/refresh-quasar-book.sh [commit]` refreshes the shipped Quasar book from a commit of the Quasar
 repository and records it in `src/QuasarAssistant/QuasarBook/COMMIT`.
 
@@ -194,6 +198,7 @@ src/QuasarAssistant/          services and Razor UI
 src/QuasarAssistant.Quasar/   the IQuasarPlugin adapter
 scripts/                      refresh-quasar-book.sh
 tests/QuasarAssistant.Tests/  xunit tests with the stub model and MCP servers
+sandbox/                      the optional code-execution MCP server (Linux) and its smoke test
 ```
 
 UI conventions are in [Native Quasar UI](docs/NativeUi.md).

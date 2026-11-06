@@ -18,6 +18,7 @@ public sealed class McpException(string message) : Exception(message);
 public sealed class McpClient(HttpClient http)
 {
     public const string ProtocolVersion = "2025-06-18";
+    public const string ConversationMeta = "quasar.assistant/conversation";
     private const int MaxTools = 500;
 
     public async Task<IReadOnlyList<McpTool>> ListToolsAsync(
@@ -63,18 +64,20 @@ public sealed class McpClient(HttpClient http)
         IReadOnlyDictionary<string, string> headers,
         string tool,
         JsonNode? arguments,
-        CancellationToken token
+        CancellationToken token,
+        string? conversation = null
     )
     {
         var session = await InitializeAsync(url, headers, token);
-        return await RequestAsync(
-            url,
-            headers,
-            session,
-            "tools/call",
-            new JsonObject { ["name"] = tool, ["arguments"] = arguments ?? new JsonObject() },
-            token
-        );
+        var parameters = new JsonObject
+        {
+            ["name"] = tool,
+            ["arguments"] = arguments ?? new JsonObject(),
+        };
+        // Lets a server keep state per conversation, such as the sandbox's workspace.
+        if (conversation is not null)
+            parameters["_meta"] = new JsonObject { [ConversationMeta] = conversation };
+        return await RequestAsync(url, headers, session, "tools/call", parameters, token);
     }
 
     private async Task<string?> InitializeAsync(

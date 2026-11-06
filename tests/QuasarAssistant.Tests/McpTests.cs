@@ -217,6 +217,11 @@ public sealed class McpTests
         var call = Assert.Single(mcp.Calls);
         Assert.Equal("lookup", call["name"]!.GetValue<string>());
         Assert.Equal("7", call["arguments"]!["id"]!.GetValue<string>());
+        // The conversation goes along, so a server can keep state per conversation.
+        Assert.Equal(
+            conversation.Id,
+            call["_meta"]!["quasar.assistant/conversation"]!.GetValue<string>()
+        );
         var result = conversation.Messages.Single(m => m.Role == ChatRole.Tool);
         Assert.False(result.IsError);
         Assert.Contains("Ticket 7 is open", result.Text);

@@ -3,6 +3,9 @@
     <Project Path="src/QuasarAssistant.Quasar/QuasarAssistant.Quasar.csproj" />
     <Project Path="src/QuasarAssistant/QuasarAssistant.csproj" />
   </Folder>
+  <Folder Name="/sandbox/">
+    <Project Path="sandbox/QuasarSandbox/QuasarSandbox.csproj" />
+  </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/QuasarAssistant.Tests/QuasarAssistant.Tests.csproj" />
   </Folder>
