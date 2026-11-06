@@ -70,7 +70,7 @@ public sealed class PlayerTests
     }
 
     [Fact]
-    public async Task HourAndDayLimitsGiveAFixedReply()
+    public async Task QuestionsRefillOverTimeUpToTheMaximum()
     {
         var time = new ManualTime();
         await using var harness = await StartAsync(time);
@@ -79,31 +79,47 @@ public sealed class PlayerTests
             {
                 Player = s.Player with
                 {
-                    Limits = new() { RequestsPerHour = 2, RequestsPerDay = 3 },
+                    Limits = new()
+                    {
+                        MaxMessages = 3,
+                        RefillMinutes = 60,
+                        RefillMessages = 1,
+                    },
                 },
             }
         );
-        for (var i = 0; i < 3; i++)
+        for (var i = 0; i < 8; i++)
             harness.Server.Enqueue("p", Replies.Answer(Kind, "ok " + i));
         var ask = new PlayerAsk();
+        var usage = harness.Services.GetRequiredService<PlayerUsageStore>();
+        var limits = harness.Settings.Current.Player.Limits;
 
-        await harness.Players.HandleAsync(ask.Game("one"), default);
-        await harness.Players.HandleAsync(ask.Game("two"), default);
-        await harness.Players.HandleAsync(ask.Game("three"), default);
-        Assert.Contains("in the last hour", ask.Replies[^1]);
-        Assert.Equal(2, harness.Server.Requests.Count);
-
-        time.Now = time.Now.AddHours(2);
-        await harness.Players.HandleAsync(ask.Game("four"), default);
-        Assert.Equal("ok 2", ask.Replies[^1]);
-        await harness.Players.HandleAsync(ask.Game("five"), default);
-        Assert.Contains("in the last 24 hours", ask.Replies[^1]);
+        // A burst up to the maximum, then a fixed reply without a model run.
+        for (var i = 0; i < 3; i++)
+            await harness.Players.HandleAsync(ask.Game("burst " + i), default);
+        await harness.Players.HandleAsync(ask.Game("one more"), default);
+        Assert.Equal(
+            "You have used up your questions. You get 1 more in 60 min, up to 3.",
+            ask.Replies[^1]
+        );
         Assert.Equal(3, harness.Server.Requests.Count);
 
-        // Another player has their own counters.
+        // One back per hour, counted from the first question, with the partial hour kept.
+        time.Now = time.Now.AddMinutes(90);
+        Assert.Equal(1, usage.Left("steam:76561198000000001", limits));
+        await harness.Players.HandleAsync(ask.Game("after 90 min"), default);
+        Assert.Equal("ok 3", ask.Replies[^1]);
+        await harness.Players.HandleAsync(ask.Game("again"), default);
+        Assert.Contains("in 30 min", ask.Replies[^1]);
+
+        // A long break fills up only to the maximum.
+        time.Now = time.Now.AddDays(2);
+        Assert.Equal(3, usage.Left("steam:76561198000000001", limits));
+
+        // Another player has their own questions.
         harness.Server.Enqueue("p", Replies.Answer(Kind, "hello"));
         await harness.Players.HandleAsync(ask.Game("hi", "76561198000000002"), default);
-        Assert.Equal("hello", ask.Replies[^1]);
+        Assert.Equal(2, usage.Left("steam:76561198000000002", limits));
     }
 
     [Fact]

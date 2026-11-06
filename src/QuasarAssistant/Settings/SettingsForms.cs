@@ -118,8 +118,9 @@ public sealed class McpServerForm
 public sealed class PlayerForm
 {
     public bool Enabled { get; set; }
-    public int RequestsPerHour { get; set; }
-    public int RequestsPerDay { get; set; }
+    public int MaxMessages { get; set; }
+    public int RefillMinutes { get; set; }
+    public int RefillMessages { get; set; }
     public int ActionsPerDay { get; set; }
     public string PrivacyNotice { get; set; } = "";
     public bool QuasarBook { get; set; }
@@ -136,8 +137,9 @@ public sealed class PlayerForm
         new()
         {
             Enabled = player.Enabled,
-            RequestsPerHour = player.Limits.RequestsPerHour,
-            RequestsPerDay = player.Limits.RequestsPerDay,
+            MaxMessages = player.Limits.MaxMessages,
+            RefillMinutes = player.Limits.RefillMinutes,
+            RefillMessages = player.Limits.RefillMessages,
             ActionsPerDay = player.Limits.ActionsPerDay,
             PrivacyNotice = player.PrivacyNotice,
             QuasarBook = player.QuasarBook,
@@ -157,8 +159,9 @@ public sealed class PlayerForm
             Enabled = Enabled,
             Limits = new()
             {
-                RequestsPerHour = Math.Max(0, RequestsPerHour),
-                RequestsPerDay = Math.Max(0, RequestsPerDay),
+                MaxMessages = Math.Max(0, MaxMessages),
+                RefillMinutes = Math.Max(1, RefillMinutes),
+                RefillMessages = Math.Max(0, RefillMessages),
                 ActionsPerDay = Math.Max(0, ActionsPerDay),
             },
             PrivacyNotice = PrivacyNotice.Trim(),
