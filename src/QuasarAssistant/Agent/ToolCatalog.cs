@@ -107,7 +107,7 @@ public sealed partial class ToolCatalog(
         string roleName
     ) =>
         available.Where(op =>
-            op.PluginId == McpRegistry.PluginId
+            op.PluginId == McpRegistry.PluginId && Area(op) == "mcp"
                 // Each role's own pair of MCP operations only.
                 ? op.OperationId == McpRegistry.ReadOperation(roleName)
                     || op.OperationId == McpRegistry.CallOperation(roleName)
