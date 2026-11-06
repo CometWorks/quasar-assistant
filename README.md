@@ -45,6 +45,10 @@ admins set up. No provider or model ships with it.
 - **Caching.** Every request of a role starts with the same bytes: the system prompt, the admins' notes and
   the tools in name order. The time, the asker and the page go into the user turn as `[host]` lines, so the
   providers' prompt caches hit.
+- **Cost.** Quasar sets no spending limit for the admin assistant; set one at the model provider. In a test with
+  Claude Sonnet 5.5 on 2026-11-06, 13 questions (8 from a player in game, 5 from an admin) each took 3 to 8
+  seconds and 1 to 3 model calls. 87% of the input tokens were read from the cache, over 90% in most runs once it
+  was warm, and the 13 answers cost about USD 0.12 together. Long conversations and large log reads cost more.
 
 ## Player support
 

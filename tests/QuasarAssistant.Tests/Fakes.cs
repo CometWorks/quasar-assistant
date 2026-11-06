@@ -409,9 +409,11 @@ public sealed class FakeServers : IQuasarServerQueries
         double y,
         double z,
         double radiusMeters,
-        CancellationToken token
+        CancellationToken token,
+        string? pluginId = null
     )
     {
+        Assert.Equal(GridBackupsTools.GridBackupsPluginId, pluginId);
         PositionQueries.Enqueue((x, y, z, radiusMeters));
         return Task.FromResult(PositionOwner((x, y, z)));
     }

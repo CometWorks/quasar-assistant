@@ -303,7 +303,8 @@ public sealed class GridBackupsTools(
                 position.Y,
                 position.Z,
                 Math.Max(1, maxSearchMeters),
-                token
+                token,
+                GridBackupsPluginId
             );
         }
         catch (Exception error) when (error is not OperationCanceledException)
