@@ -9,10 +9,9 @@ internal static class OpenAiFormat
 {
     public static JsonObject Body(BackendSettings backend, ChatRequest request)
     {
-        var messages = new JsonArray
-        {
-            new JsonObject { ["role"] = "system", ["content"] = request.System },
-        };
+        var messages = new JsonArray();
+        if (request.System.Length > 0)
+            messages.Add(new JsonObject { ["role"] = "system", ["content"] = request.System });
         foreach (var message in JsonHelpers.ForModel(request.Messages))
             // An empty answer, such as one that only thought, is nothing to send back.
             if (

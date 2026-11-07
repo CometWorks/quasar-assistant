@@ -68,6 +68,30 @@ public sealed class SettingsStore
         Changed?.Invoke();
     }
 
+    public SettingsSnapshot Snapshot()
+    {
+        lock (_lock)
+            return new(
+                _settings,
+                new Dictionary<string, string>(_keys),
+                new Dictionary<string, string>(_mcpHeaders)
+            );
+    }
+
+    /// <summary>Puts the settings, keys and MCP headers back as they were in the snapshot.</summary>
+    public void Restore(SettingsSnapshot snapshot)
+    {
+        lock (_lock)
+        {
+            JsonFiles.Write(_settingsPath, snapshot.Settings);
+            _settings = snapshot.Settings;
+            _effective = [];
+            SaveKeys(new Dictionary<string, string>(snapshot.Keys));
+            SaveMcpHeaders(new Dictionary<string, string>(snapshot.McpHeaders));
+        }
+        Changed?.Invoke();
+    }
+
     /// <summary>The role as its agent runs, the same instance until the settings change, so the tool sets built
     /// from it stay cached.</summary>
     public RoleSettings EffectiveRole(string name)

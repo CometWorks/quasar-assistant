@@ -3,7 +3,10 @@
 @using System.Diagnostics
 @using System.Text.Json.Nodes
 @using QuasarAssistant.Monitoring
+@using QuasarAssistant.Skills
 @inject SettingsStore Store
+@inject SkillLibrary Skills
+@inject NavigationManager Navigation
 @inject ToolCatalog Catalog
 @inject LlmClient Client
 @inject MetricsLog Metrics
@@ -14,6 +17,7 @@
 <PageTitle>Assistant settings</PageTitle>
 <div class="assistant-surface assistant-settings">
     <h1>Assistant settings</h1>
+    <p class="assistant-hint">Changes are saved as you make them. <strong>Revert my changes</strong> at the bottom of the page puts everything back as it was when you opened the page.</p>
     @if (_message is not null)
     {
         <p class="@(_failed ? "assistant-error" : "assistant-notice")" role="@(_failed ? "alert" : "status")">@_message</p>
@@ -55,7 +59,7 @@
         }
         else
         {
-            <form class="assistant-form" @onsubmit="SaveBackend">
+            <form class="assistant-form" @onsubmit="CloseBackend">
                 <h3>@(_form.Original is null ? "New backend" : "Edit " + _form.Original)</h3>
                 <label>Name <input required maxlength="64" @bind="_form.Name" /></label>
                 <label>Kind
@@ -96,8 +100,7 @@
                 <label>Headers, one <code>Name: value</code> per line (keys go in the API key field) <textarea rows="3" @bind="_form.Headers"></textarea></label>
                 <label>Extra body, a JSON object merged into each request <textarea rows="3" @bind="_form.ExtraBody" placeholder='{"provider": {"sort": "price"}}'></textarea></label>
                 <div class="assistant-row">
-                    <button type="submit" class="assistant-button assistant-button-primary">Save backend</button>
-                    <button type="button" class="assistant-button" @onclick="() => _form = null">Cancel</button>
+                    <button type="submit" class="assistant-button assistant-button-primary">Done</button>
                 </div>
             </form>
         }
@@ -106,9 +109,8 @@
     <section>
         <h2>Admin assistant</h2>
         <p class="assistant-hint">Admins chat with it in the web UI and with <code>/assistant</code> in the admin Discord channel.</p>
-        <RoleEditor Form="_admin" Role="@AssistantRoles.Admin" AllBackends="BackendNames" Operations="ToolCatalog.OfRole(_operations, AssistantRoles.Admin).ToList()" />
+        <RoleEditor Form="_admin" Role="@AssistantRoles.Admin" AllBackends="BackendNames" Changed="Edited" Operations="ToolCatalog.OfRole(_operations, AssistantRoles.Admin).ToList()" />
         <SkillsEditor Role="@AssistantRoles.Admin" />
-        <button type="button" class="assistant-button assistant-button-primary" @onclick="() => SaveRole(AssistantRoles.Admin, _admin)">Save the admin assistant</button>
     </section>
 
     <section>
@@ -126,7 +128,7 @@
             <textarea class="assistant-wide" rows="2" maxlength="1000" @bind="_player.PrivacyNotice" placeholder="@AskCommand.PrivacyNotice(Store.Current with { Player = Store.Current.Player with { PrivacyNotice = "" } })"></textarea>
         </label>
 
-        <RoleEditor Form="_playerRole" Role="@AssistantRoles.Player" AllBackends="BackendNames" Operations="ToolCatalog.OfRole(_operations, AssistantRoles.Player).ToList()" />
+        <RoleEditor Form="_playerRole" Role="@AssistantRoles.Player" AllBackends="BackendNames" Changed="Edited" Operations="ToolCatalog.OfRole(_operations, AssistantRoles.Player).ToList()" />
         <SkillsEditor Role="@AssistantRoles.Player" />
 
         <h3>Grid restores</h3>
@@ -154,7 +156,6 @@
             }
         </fieldset>
 
-        <button type="button" class="assistant-button assistant-button-primary" @onclick="SavePlayer">Save player support</button>
     </section>
 
     <section>
@@ -193,8 +194,7 @@
         </div>
         <p role="status">@BudgetLine(Budget.Status())</p>
 
-        <RoleEditor Form="_monitorRole" Role="@AssistantRoles.Monitor" AllBackends="BackendNames" Operations="ToolCatalog.OfRole(_operations, AssistantRoles.Monitor).ToList()" />
-        <button type="button" class="assistant-button assistant-button-primary" @onclick="SaveMonitor">Save the monitor</button>
+        <RoleEditor Form="_monitorRole" Role="@AssistantRoles.Monitor" AllBackends="BackendNames" Changed="Edited" Operations="ToolCatalog.OfRole(_operations, AssistantRoles.Monitor).ToList()" />
     </section>
 
     <section>
@@ -214,7 +214,6 @@
                 <p class="@(status.Error is null ? "assistant-hint" : "assistant-error")">@role: @(status.Error is null ? $"{status.Tools} tools, fetched {status.Time.UtcDateTime:yyyy-MM-dd HH:mm} UTC." : "fetching the tools failed: " + status.Error)</p>
             }
         }
-        <button type="button" class="assistant-button assistant-button-primary" @onclick="SaveSandbox">Save code execution</button>
     </section>
 
     <section>
@@ -234,7 +233,6 @@
             <label>Delete conversations after (days) <input type="number" min="1" @bind="_general.ConversationRetentionDays" /></label>
             <label>Proposals and hand-overs expire after (days) <input type="number" min="1" @bind="_general.ProposalExpiryDays" /></label>
         </div>
-        <button type="button" class="assistant-button assistant-button-primary" @onclick="SaveGeneral">Save notifications and general settings</button>
     </section>
 
     <section>
@@ -269,6 +267,33 @@
             </table>
         </div>
     </section>
+
+    <section>
+        <h2>Revert</h2>
+        @if (_revertChanges is null)
+        {
+            <button type="button" class="assistant-button" @onclick="AskRevert">Revert my changes</button>
+        }
+        else if (_revertChanges.Count == 0)
+        {
+            <p role="status">Nothing changed since you opened this page.</p>
+            <button type="button" class="assistant-button" @onclick="() => _revertChanges = null">Close</button>
+        }
+        else
+        {
+            <p role="alert">Put back the settings as they were when you opened this page? This reverts:</p>
+            <ul class="assistant-revert-list">
+                @foreach (var change in _revertChanges)
+                {
+                    <li><code>@change</code></li>
+                }
+            </ul>
+            <div class="assistant-row">
+                <button type="button" class="assistant-button assistant-button-primary" @onclick="Revert">Yes</button>
+                <button type="button" class="assistant-button" @onclick="() => _revertChanges = null">No</button>
+            </div>
+        }
+    </section>
 </div>
 
 @code {
@@ -289,10 +314,65 @@
 
     private IReadOnlyList<Quasar.Plugin.Abstractions.Operations.QuasarOperation> _operations = [];
 
+    private ConfigSnapshot _snapshot = null!;
+    // The forms as last loaded or saved; only sections that differ from it are saved.
+    private AssistantSettings _baseline = new();
+    private IReadOnlyList<string>? _revertChanges;
+    private bool _reverting;
+
+    private (string Name, Func<RoleForm> Form)[] RoleForms =>
+    [
+        (AssistantRoles.Admin, () => _admin),
+        (AssistantRoles.Player, () => _playerRole),
+        (AssistantRoles.Monitor, () => _monitorRole),
+    ];
+
+    private sealed record Section(
+        string Label,
+        Func<AssistantSettings, object> Get,
+        Func<AssistantSettings, AssistantSettings, AssistantSettings> Copy
+    );
+
+    private static Section RoleSection(string label, string role) =>
+        new(label, s => s.Role(role), (to, from) => to.WithRole(role, from.Role(role)));
+
+    private static readonly Section[] Sections =
+    [
+        RoleSection("the admin assistant", AssistantRoles.Admin),
+        RoleSection("player support", AssistantRoles.Player),
+        new("player support", s => s.Player, (to, from) => to with { Player = from.Player }),
+        RoleSection("the monitor", AssistantRoles.Monitor),
+        new("the monitor", s => s.Monitor, (to, from) => to with { Monitor = from.Monitor }),
+        new("code execution", s => s.Sandbox, (to, from) => to with { Sandbox = from.Sandbox }),
+        new(
+            "notifications and general settings",
+            s => new { s.ResultCapBytes, s.ConversationRetentionDays, s.ProposalExpiryDays, s.Notifications, s.Discord },
+            (to, from) => to with
+            {
+                ResultCapBytes = from.ResultCapBytes,
+                ConversationRetentionDays = from.ConversationRetentionDays,
+                ProposalExpiryDays = from.ProposalExpiryDays,
+                Notifications = from.Notifications,
+                Discord = from.Discord,
+            }
+        ),
+    ];
+
     protected override async Task OnInitializedAsync()
     {
+        _snapshot = ConfigSnapshot.Take(Store, Skills);
         Load();
         _operations = await Catalog.AgentOperationsAsync();
+    }
+
+    // A child editor's edit renders only the child; this renders the page, which saves it.
+    private void Edited() { }
+
+    protected override void OnAfterRender(bool firstRender)
+    {
+        // Every edit renders the page, so this saves it; a save that changed something renders once more.
+        if (!_reverting && AutoSave())
+            StateHasChanged();
     }
 
     private void Load()
@@ -306,37 +386,150 @@
         _sandboxToken = null;
         _player = PlayerForm.From(_settings.Player);
         _general = GeneralForm.From(_settings);
+        _baseline = Compose(_settings).Settings;
     }
 
     private IReadOnlyList<string> BackendNames => _settings.Backends.Select(b => b.Name).ToList();
 
-    private void Edit(BackendSettings? backend) => _form = BackendForm.From(backend);
+    /// <summary>The forms applied to the settings; a form that doesn't validate leaves its part as it was.</summary>
+    private (AssistantSettings Settings, string? Problem) Compose(AssistantSettings onto)
+    {
+        string? problem = null;
+        var settings = onto;
+        foreach (var (name, form) in RoleForms)
+        {
+            if (form().Validate() is { } invalid)
+                problem ??= invalid;
+            else
+                settings = settings.WithRole(name, form().ToSettings());
+        }
+        settings = settings with { Player = _player.ToSettings(), Monitor = _monitor.ToSettings() };
+        var url = _sandboxUrl.Trim();
+        if (url.Length > 0 && (!Uri.TryCreate(url, UriKind.Absolute, out var parsed) || parsed.Scheme is not ("http" or "https")))
+            problem ??= "The sandbox URL must be an http or https URL.";
+        else
+            settings = settings with { Sandbox = new() { Url = url } };
+        return (_general.Apply(settings), problem);
+    }
 
-    private void SaveBackend()
+    private static string Json(object value) => System.Text.Json.JsonSerializer.Serialize(value);
+
+    /// <summary>Saves what changed since the last save; true when it saved or has something new to say.</summary>
+    private bool AutoSave()
+    {
+        var saved = new List<string>();
+        var problem = SaveBackendForm(saved);
+        var (candidate, formProblem) = Compose(_baseline);
+        problem ??= formProblem;
+        var sections = Sections.Where(section => Json(section.Get(candidate)) != Json(section.Get(_baseline))).ToList();
+        var token = string.IsNullOrEmpty(_sandboxToken) ? null : _sandboxToken.Trim();
+        var headers = RoleForms
+            .Where(role => role.Form().Validate() is null)
+            .SelectMany(role => role.Form().McpServers.Select(server => (role.Name, Server: server)))
+            .Where(pair => pair.Server.RemoveHeaders || pair.Server.Headers.Trim().Length > 0
+                || pair.Server.Original is not null && pair.Server.Original != pair.Server.Name.Trim())
+            .ToList();
+        if (sections.Count > 0 || token is not null || headers.Count > 0)
+        {
+            // Header values are write-only: carry them over a rename before the save drops the old name's.
+            var carried = headers
+                .Where(pair => !pair.Server.RemoveHeaders && pair.Server.Headers.Trim().Length == 0)
+                .ToDictionary(pair => (pair.Name, pair.Server), pair => Store.McpHeaders(pair.Name, pair.Server.Original!));
+            // The token first: saving the settings fetches the sandbox's tools with it.
+            if (token is not null)
+            {
+                Store.SetSandboxToken(token);
+                _sandboxToken = null;
+                saved.Add("code execution");
+            }
+            Store.Save(sections.Aggregate(Store.Current, (settings, section) => section.Copy(settings, candidate)));
+            foreach (var (role, server) in headers)
+            {
+                var name = server.Name.Trim();
+                if (server.RemoveHeaders)
+                    Store.SetMcpHeaders(role, name, new Dictionary<string, string>());
+                else if (server.Headers.Trim().Length > 0)
+                    Store.SetMcpHeaders(role, name, server.ParsedHeaders());
+                else if (carried.TryGetValue((role, server), out var kept))
+                    Store.SetMcpHeaders(role, name, kept);
+                server.Original = name;
+                server.Headers = "";
+                server.RemoveHeaders = false;
+            }
+            _baseline = candidate;
+            _settings = Store.Current;
+            saved.AddRange(sections.Select(section => section.Label));
+            saved.AddRange(headers.Select(pair => pair.Name switch
+            {
+                AssistantRoles.Player => "player support",
+                AssistantRoles.Monitor => "the monitor",
+                _ => "the admin assistant",
+            }));
+        }
+        var message = string.Join(" ", new[]
+        {
+            saved.Count > 0 ? "Saved " + string.Join(", ", saved.Distinct()) + "." : null,
+            problem is null ? null : "Not saved: " + problem,
+        }.Where(part => part is not null));
+        if (message.Length == 0 || message == _message)
+            return saved.Count > 0;
+        Say(message, failed: problem is not null);
+        return true;
+    }
+
+    /// <summary>Saves the open backend form once it is valid; a new backend keeps quiet until then.</summary>
+    private string? SaveBackendForm(List<string> saved)
     {
         if (_form is null)
-            return;
-        if (_form.Validate(_settings) is { } problem)
-        {
-            Say(problem, failed: true);
-            return;
-        }
+            return null;
+        var stored = _settings.Backends.FirstOrDefault(b => b.Name == _form.Original);
+        var problem = _form.Validate(_settings);
+        if (problem is not null)
+            return stored is null ? null : problem;
         var backend = _form.ToSettings();
-        var backends = _settings.Backends.Where(b => b.Name != _form.Original).Append(backend).ToList();
+        if (stored is not null && Json(backend) == Json(stored) && string.IsNullOrEmpty(_form.ApiKey) && !_form.RemoveKey)
+            return null;
+        var original = _form.Original;
         var roles = _settings.Roles.ToDictionary(
             pair => pair.Key,
-            pair => pair.Value with { Backends = pair.Value.Backends.Select(name => name == _form.Original ? backend.Name : name).ToList() }
+            pair => pair.Value with { Backends = pair.Value.Backends.Select(name => name == original ? backend.Name : name).ToList() }
         );
-        if (_form.Original is not null)
-            Store.RenameApiKey(_form.Original, backend.Name);
-        Store.Save(_settings with { Backends = backends, Roles = roles });
+        if (original is not null && original != backend.Name)
+        {
+            Store.RenameApiKey(original, backend.Name);
+            foreach (var (_, form) in RoleForms)
+                form().Backends = form().Backends.Select(name => name == original ? backend.Name : name).ToList();
+            _baseline = _baseline with
+            {
+                Roles = _baseline.Roles.ToDictionary(
+                    pair => pair.Key,
+                    pair => pair.Value with { Backends = pair.Value.Backends.Select(name => name == original ? backend.Name : name).ToList() }
+                ),
+            };
+        }
+        Store.Save(_settings with { Backends = _settings.Backends.Where(b => b.Name != original).Append(backend).ToList(), Roles = roles });
         if (_form.RemoveKey)
             Store.SetApiKey(backend.Name, null);
         else if (!string.IsNullOrEmpty(_form.ApiKey))
             Store.SetApiKey(backend.Name, _form.ApiKey.Trim());
+        _form.Original = backend.Name;
+        _form.ApiKey = null;
+        _form.RemoveKey = false;
+        _settings = Store.Current;
+        saved.Add(backend.Name);
+        return null;
+    }
+
+    private void Edit(BackendSettings? backend) => _form = BackendForm.From(backend);
+
+    private void CloseBackend()
+    {
+        if (_form?.Validate(_settings) is { } problem)
+        {
+            Say(problem, failed: true);
+            return;
+        }
         _form = null;
-        Load();
-        Say($"Saved {backend.Name}.");
     }
 
     private void DeleteBackend(BackendSettings backend)
@@ -346,8 +539,22 @@
             pair => pair.Value with { Backends = pair.Value.Backends.Where(name => name != backend.Name).ToList() }
         );
         Store.Save(_settings with { Backends = _settings.Backends.Where(b => b.Name != backend.Name).ToList(), Roles = roles });
-        Load();
+        _settings = Store.Current;
+        foreach (var (_, form) in RoleForms)
+            form().Backends.Remove(backend.Name);
+        _baseline = _baseline with { Backends = _settings.Backends, Roles = roles };
+        if (_form?.Original == backend.Name)
+            _form = null;
         Say($"Deleted {backend.Name}.");
+    }
+
+    private void AskRevert() => _revertChanges = _snapshot.Changes(ConfigSnapshot.Take(Store, Skills));
+
+    private void Revert()
+    {
+        _reverting = true;
+        _snapshot.Restore(Store, Skills);
+        Navigation.NavigateTo(Navigation.Uri, forceLoad: true);
     }
 
     private static void Toggle(HashSet<string> set, string value, bool on)
@@ -356,76 +563,6 @@
             set.Add(value);
         else
             set.Remove(value);
-    }
-
-    private bool SaveRole(string name, RoleForm form)
-    {
-        if (form.Validate() is { } problem)
-        {
-            Say(problem, failed: true);
-            return false;
-        }
-        // Header values are write-only: carry them over a rename, then apply what was typed.
-        var carried = form.McpServers
-            .Where(server => server.Original is not null && server.Original != server.Name.Trim() && !server.RemoveHeaders && server.Headers.Trim().Length == 0)
-            .ToDictionary(server => server.Name.Trim(), server => Store.McpHeaders(name, server.Original!));
-        Store.Save(Store.Current.WithRole(name, form.ToSettings()));
-        foreach (var server in form.McpServers)
-        {
-            var serverName = server.Name.Trim();
-            if (server.RemoveHeaders)
-                Store.SetMcpHeaders(name, serverName, new Dictionary<string, string>());
-            else if (server.Headers.Trim().Length > 0)
-                Store.SetMcpHeaders(name, serverName, server.ParsedHeaders());
-            else if (carried.TryGetValue(serverName, out var headers))
-                Store.SetMcpHeaders(name, serverName, headers);
-        }
-        Load();
-        Say(name switch
-        {
-            AssistantRoles.Player => "Saved player support.",
-            AssistantRoles.Monitor => "Saved the monitor.",
-            _ => "Saved the admin assistant.",
-        });
-        return true;
-    }
-
-    private void SavePlayer()
-    {
-        if (_playerRole.Validate() is { } problem)
-        {
-            Say(problem, failed: true);
-            return;
-        }
-        Store.Save(Store.Current with { Player = _player.ToSettings() });
-        SaveRole(AssistantRoles.Player, _playerRole);
-    }
-
-    private void SaveSandbox()
-    {
-        var url = _sandboxUrl.Trim();
-        if (url.Length > 0 && (!Uri.TryCreate(url, UriKind.Absolute, out var parsed) || parsed.Scheme is not ("http" or "https")))
-        {
-            Say("The sandbox URL must be an http or https URL.", failed: true);
-            return;
-        }
-        // The token first: saving the settings fetches the tools with it.
-        if (!string.IsNullOrEmpty(_sandboxToken))
-            Store.SetSandboxToken(_sandboxToken.Trim());
-        Store.Save(Store.Current with { Sandbox = new() { Url = url } });
-        Load();
-        Say("Saved code execution.");
-    }
-
-    private void SaveMonitor()
-    {
-        if (_monitorRole.Validate() is { } problem)
-        {
-            Say(problem, failed: true);
-            return;
-        }
-        Store.Save(Store.Current with { Monitor = _monitor.ToSettings() });
-        SaveRole(AssistantRoles.Monitor, _monitorRole);
     }
 
     internal static string BudgetLine(BudgetStatus status)
@@ -438,14 +575,8 @@
             + (money.Length == 0 ? " Set the prices of the monitor's backends to see it in money." : "");
     }
 
-    private void SaveGeneral()
-    {
-        Store.Save(_general.Apply(Store.Current));
-        Load();
-        Say("Saved the notifications and general settings.");
-    }
-
-    // A real one-line completion, outside the failover, so a test never cools a backend down.
+    // A real completion of "1+1=" in at most 20 tokens, without thinking, outside the failover, so a test never
+    // cools a backend down.
     private async Task TestAsync(BackendSettings backend)
     {
         _testing = backend.Name;
@@ -453,16 +584,15 @@
         TimeSpan? firstText = null;
         try
         {
-            var request = new ChatRequest(
-                "Answer in one short line.",
-                [],
-                [new ChatMessage { Role = ChatRole.User, Text = "Say hello." }]
-            );
+            var request = new ChatRequest("", [], [new ChatMessage { Role = ChatRole.User, Text = "1+1=" }]);
             using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(120));
-            var answer = await Client.SendAsync(backend with { MaxTokens = Math.Min(backend.MaxTokens, 1024) }, Store.ApiKey(backend.Name), request,
+            var answer = await Client.SendAsync(backend with { MaxTokens = 20, Thinking = ThinkingLevel.None }, Store.ApiKey(backend.Name), request,
                 text => firstText ??= text.Length > 0 ? clock.Elapsed : null, timeout.Token);
             var first = firstText is { } t ? $", first text after {t.TotalSeconds:0.0} s" : "";
-            _tests[backend.Name] = (true, $"OK in {clock.Elapsed.TotalSeconds:0.0} s{first}: {Short(answer.Text)}");
+            var right = answer.Text.Contains('2') || answer.Text.Contains("two", StringComparison.OrdinalIgnoreCase);
+            _tests[backend.Name] = right
+                ? (true, $"OK in {clock.Elapsed.TotalSeconds:0.0} s{first}: {Short(answer.Text)}")
+                : (false, $"Answered in {clock.Elapsed.TotalSeconds:0.0} s without 2 or two: {(answer.Text.Length == 0 ? "(no text)" : Short(answer.Text))}");
         }
         catch (Exception error) when (error is BackendFailure or BackendRejected or OperationCanceledException)
         {

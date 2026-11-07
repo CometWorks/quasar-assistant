@@ -9,7 +9,7 @@
             <span>@name</span>
             <button type="button" class="assistant-icon-button" title="Move up" aria-label="Move @name up" disabled="@(index == 0)" @onclick="() => Move(index, -1)"><AssistantIcon Icon="@AssistantIcons.Up" /></button>
             <button type="button" class="assistant-icon-button" title="Move down" aria-label="Move @name down" disabled="@(index == Form.Backends.Count - 1)" @onclick="() => Move(index, 1)"><AssistantIcon Icon="@AssistantIcons.Down" /></button>
-            <button type="button" class="assistant-icon-button" title="Remove" aria-label="Remove @name" @onclick="() => Form.Backends.RemoveAt(index)"><AssistantIcon Icon="@AssistantIcons.Close" /></button>
+            <button type="button" class="assistant-icon-button" title="Remove" aria-label="Remove @name" @onclick="() => RemoveAsync(index)"><AssistantIcon Icon="@AssistantIcons.Close" /></button>
         </li>
     }
 </ol>
@@ -30,15 +30,15 @@
 
 <h3>Runs</h3>
 <div class="assistant-form">
-    <label>Runs at once <input type="number" min="1" max="32" @bind="Form.MaxConcurrentRuns" /></label>
-    <label>Queue wait (s) <input type="number" min="1" @bind="Form.QueueWaitSeconds" /></label>
-    <label>Run deadline (s) <input type="number" min="10" @bind="Form.RunDeadlineSeconds" /></label>
-    <label>Model turns per run <input type="number" min="1" max="200" @bind="Form.MaxTurns" /></label>
+    <label>Runs at once <input type="number" min="1" max="32" @bind="Form.MaxConcurrentRuns" @bind:after="Notify" /></label>
+    <label>Queue wait (s) <input type="number" min="1" @bind="Form.QueueWaitSeconds" @bind:after="Notify" /></label>
+    <label>Run deadline (s) <input type="number" min="10" @bind="Form.RunDeadlineSeconds" @bind:after="Notify" /></label>
+    <label>Model turns per run <input type="number" min="1" max="200" @bind="Form.MaxTurns" @bind:after="Notify" /></label>
 </div>
 
 <h3>Notes for the assistant</h3>
 <p class="assistant-hint">Added to the system prompt. Every request sends it, so keep it short and stable. Longer text, such as a FAQ, goes in a skill.</p>
-<textarea class="assistant-wide" rows="4" maxlength="8000" @bind="Form.RoleText" aria-label="Notes for the @Label"></textarea>
+<textarea class="assistant-wide" rows="4" maxlength="8000" @bind="Form.RoleText" @bind:after="Notify" aria-label="Notes for the @Label"></textarea>
 
 <h3>What the @Label may do</h3>
 <p class="assistant-hint">@ModesHint</p>
@@ -52,7 +52,7 @@
                     <th scope="row">@area</th>
                     <td>
                         <select value="@(Form.AreaModes.TryGetValue(area, out var mode) ? mode.ToString() : "")" aria-label="Mode for @area"
-                                @onchange="e => SetMode(Form.AreaModes, area, (string?)e.Value)">
+                                @onchange="e => SetModeAsync(Form.AreaModes, area, (string?)e.Value)">
                             <option value="">Default (reads: read, changes: propose)</option>
                             @foreach (var option in Enum.GetValues<ToolMode>())
                             {
@@ -79,7 +79,7 @@
                         <td>@(ToolCatalog.Effect(operation) == QuasarOperationEffect.Read ? "read" : "change")</td>
                         <td>
                             <select value="@(Form.OperationModes.TryGetValue(operation.Key, out var mode) ? mode.ToString() : "")" aria-label="Mode for @operation.Key"
-                                    @onchange="e => SetMode(Form.OperationModes, operation.Key, (string?)e.Value)">
+                                    @onchange="e => SetModeAsync(Form.OperationModes, operation.Key, (string?)e.Value)">
                                 <option value="">Area's mode</option>
                                 @foreach (var option in Enum.GetValues<ToolMode>())
                                 {
@@ -96,14 +96,17 @@
 </details>
 
 <h3>Code execution</h3>
-<label class="assistant-check"><input type="checkbox" @bind="Form.CodeExecution" /> Let the @Label run Python and C# in the sandbox (<code>run_code</code>, <code>read_file</code>), when the sandbox is set up under Code execution</label>
+<label class="assistant-check"><input type="checkbox" @bind="Form.CodeExecution" @bind:after="Notify" /> Let the @Label run Python and C# in the sandbox (<code>run_code</code>, <code>read_file</code>), when the sandbox is set up under Code execution</label>
 
-<McpEditor Role="@Role" Servers="Form.McpServers" />
+<McpEditor Role="@Role" Servers="Form.McpServers" Changed="Changed" />
 
 @code {
     [Parameter, EditorRequired] public RoleForm Form { get; set; } = null!;
     [Parameter, EditorRequired] public string Role { get; set; } = "";
     [Parameter, EditorRequired] public IReadOnlyList<string> AllBackends { get; set; } = [];
+
+    /// <summary>Raised after every edit, so the page saves it.</summary>
+    [Parameter] public EventCallback Changed { get; set; }
 
     /// <summary>The operations whose modes this role sets.</summary>
     [Parameter, EditorRequired] public IReadOnlyList<QuasarOperation> Operations { get; set; } = [];
@@ -123,21 +126,34 @@
         ? "Per tool: off hides it, read offers only reads, propose turns each change into a proposal an admin approves, apply runs it at once. A grid restore in apply runs at once only for the loss causes allowed below. The player only ever reaches their own things."
         : "Per area of operations: off hides them, read offers only reads, propose turns each change into a proposal an admin approves, apply runs changes at once (on Discord changes are always proposals). Every call is still checked against the asker's own permissions. Operations Quasar closes to agents, by its deny list and the current access rules, aren't listed.";
 
-    private void Move(int index, int by) =>
-        (Form.Backends[index], Form.Backends[index + by]) = (Form.Backends[index + by], Form.Backends[index]);
+    private Task Notify() => Changed.InvokeAsync();
 
-    private void Add()
+    private Task Move(int index, int by)
+    {
+        (Form.Backends[index], Form.Backends[index + by]) = (Form.Backends[index + by], Form.Backends[index]);
+        return Notify();
+    }
+
+    private Task RemoveAsync(int index)
+    {
+        Form.Backends.RemoveAt(index);
+        return Notify();
+    }
+
+    private Task Add()
     {
         if (!string.IsNullOrEmpty(_addBackend))
             Form.Backends.Add(_addBackend);
         _addBackend = null;
+        return Notify();
     }
 
-    private static void SetMode(Dictionary<string, ToolMode> modes, string key, string? value)
+    private Task SetModeAsync(Dictionary<string, ToolMode> modes, string key, string? value)
     {
         if (Enum.TryParse<ToolMode>(value, out var mode))
             modes[key] = mode;
         else
             modes.Remove(key);
+        return Notify();
     }
 }

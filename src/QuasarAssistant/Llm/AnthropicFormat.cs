@@ -14,16 +14,17 @@ internal static class AnthropicFormat
             ["model"] = backend.Model,
             ["max_tokens"] = backend.MaxTokens,
             ["stream"] = true,
-            // Tools render before the system prompt, so this breakpoint caches both.
-            ["system"] = new JsonArray(
+        };
+        // Tools render before the system prompt, so this breakpoint caches both. An empty text block is refused.
+        if (request.System.Length > 0)
+            body["system"] = new JsonArray(
                 new JsonObject
                 {
                     ["type"] = "text",
                     ["text"] = request.System,
                     ["cache_control"] = Ephemeral(),
                 }
-            ),
-        };
+            );
         if (request.Tools.Count > 0)
             body["tools"] = Tools(request.Tools);
         body["messages"] = Messages(request.Messages);
