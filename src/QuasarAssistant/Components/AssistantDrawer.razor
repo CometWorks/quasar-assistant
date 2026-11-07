@@ -1,6 +1,17 @@
 @* The chat drawer on every page (QuasarExtensionTargets.LayoutDrawer, policy CanUseAssistant). *@
+@implements IDisposable
+@inject SettingsStore Settings
 
-@if (_open)
+@if (!_configured)
+{
+    @* Without a backend the chat can't answer, so only those who can add one see the launcher, as a link to the settings. *@
+    <AuthorizeView Policy="@QuasarPolicyNames.CanManageSecurity">
+        <a class="assistant-launcher" href="assistant/settings" title="Set up the assistant" aria-label="Set up the assistant: add a model backend">
+            <AssistantIcon Icon="@AssistantIcons.Sparkles" />
+        </a>
+    </AuthorizeView>
+}
+else if (_open)
 {
     <aside class="assistant-drawer" aria-label="Assistant">
         <header class="assistant-drawer-header">
@@ -31,7 +42,25 @@ else
     [Parameter] public string? ServerName { get; set; }
 
     private bool _open;
+    private bool _configured;
     private string? _conversationId;
 
+    protected override void OnInitialized()
+    {
+        _configured = IsConfigured();
+        Settings.Changed += OnSettingsChanged;
+    }
+
+    private bool IsConfigured() => Settings.Current.BackendsOf(AssistantRoles.Admin).Count > 0;
+
+    private void OnSettingsChanged() =>
+        _ = InvokeAsync(() =>
+        {
+            _configured = IsConfigured();
+            StateHasChanged();
+        });
+
     private void New() => _conversationId = null;
+
+    public void Dispose() => Settings.Changed -= OnSettingsChanged;
 }
