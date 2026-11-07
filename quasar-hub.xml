@@ -8,13 +8,16 @@
   <RepoId>CometWorks/quasar-assistant</RepoId>
   <FriendlyName>Assistant</FriendlyName>
   <Author>CometWorks</Author>
-  <Tooltip>An admin assistant that reads and changes your servers through Quasar's operations.</Tooltip>
+  <Tooltip>An assistant for admins and players that reads and changes your servers through Quasar's operations.</Tooltip>
   <Description>
     An admin assistant for Quasar. Admins chat with it in a drawer on every page or on its own page. It answers
     from Quasar's operations: it reads server status, logs, settings and players, and it changes things or
     proposes changes for another admin to approve, as the admins allow per area. Every call is checked against
     the asking admin's own permissions and written to Quasar's audit log. Bring your own models: an
     OpenAI-compatible API (OpenRouter, OpenAI, llama.cpp, vLLM) or the Anthropic API, with failover between them.
+    Players can ask it with !ask in game and /ask on Discord about the server and their own grids, and it
+    restores lost grids within the limits and rules the admins set. Admins can also ask it on Discord, where it
+    only proposes changes.
   </Description>
   <PluginKind>QuasarUiPlugin</PluginKind>
   <ProjectPath>src/QuasarAssistant.Quasar/QuasarAssistant.Quasar.csproj</ProjectPath>

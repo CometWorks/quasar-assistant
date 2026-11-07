@@ -1,0 +1,82 @@
+@using QuasarAssistant.Mcp
+@inject McpRegistry Registry
+@inject SettingsStore Store
+
+<h3>MCP servers</h3>
+<p class="assistant-hint">Remote MCP servers over streamable HTTP. Their tools are fetched when you save and when Quasar starts. Tools you mark read-only follow the mode of <code>quasar.assistant/@McpRegistry.ReadOperation(Role)</code>; every other tool is always a proposal and can't be undone. Calls go through Quasar as the <code>@McpRegistry.ReadOperation(Role)</code> and <code>@McpRegistry.CallOperation(Role)</code> operations, so they are checked and audited.</p>
+@foreach (var server in Servers)
+{
+    var status = server.Original is null ? null : Registry.Status(Role, server.Original);
+    var tools = server.Original is null ? new List<McpTool>() : Registry.Tools(Role).Where(t => t.Server == server.Original).ToList();
+    <fieldset class="assistant-fieldset">
+        <legend>@(string.IsNullOrWhiteSpace(server.Name) ? "New server" : server.Name)</legend>
+        <div class="assistant-form">
+            <label>Name (letters, digits, - and _) <input required maxlength="32" @bind="server.Name" /></label>
+            <label>URL <input required type="url" @bind="server.Url" placeholder="https://mcp.example.com/mcp" /></label>
+            <label class="assistant-check"><input type="checkbox" @bind="server.Enabled" /> Enabled</label>
+            <label>Headers, one <code>Name: value</code> per line
+                <textarea rows="2" @bind="server.Headers"
+                          placeholder="@(server.Original is not null && Store.McpHeaderNames(Role, server.Original) is { Count: > 0 } names ? "Set: " + string.Join(", ", names) + ". Type new ones to replace them." : "None")"></textarea>
+            </label>
+            @if (server.Original is not null && Store.McpHeaderNames(Role, server.Original).Count > 0)
+            {
+                <label class="assistant-check"><input type="checkbox" @bind="server.RemoveHeaders" /> Remove the stored headers</label>
+            }
+        </div>
+        @if (status is not null)
+        {
+            <p class="@(status.Error is null ? "assistant-hint" : "assistant-error")">
+                @(status.Error is null ? $"{status.Tools} tools, fetched {status.Time.UtcDateTime:yyyy-MM-dd HH:mm} UTC." : $"Fetching the tools failed: {status.Error}")
+            </p>
+        }
+        @if (tools.Count > 0)
+        {
+            <p>Read-only tools:</p>
+            <ul class="assistant-checklist">
+                @foreach (var tool in tools)
+                {
+                    <li>
+                        <label class="assistant-check" title="@tool.Description">
+                            <input type="checkbox" checked="@server.ReadOnlyTools.Contains(tool.Name)"
+                                   @onchange="e => Mark(server, tool.Name, e.Value is true)" />
+                            <code>@tool.Name</code>
+                        </label>
+                    </li>
+                }
+            </ul>
+        }
+        <button type="button" class="assistant-button" @onclick="() => Servers.Remove(server)"><AssistantIcon Icon="@AssistantIcons.Delete" />Remove server</button>
+    </fieldset>
+}
+<div class="assistant-row">
+    <button type="button" class="assistant-button" @onclick="() => Servers.Add(new())"><AssistantIcon Icon="@AssistantIcons.Add" />Add an MCP server</button>
+    <button type="button" class="assistant-button" disabled="@_refreshing" @onclick="RefreshAsync"><AssistantIcon Icon="@AssistantIcons.Refresh" />Fetch tools again</button>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public string Role { get; set; } = "";
+    [Parameter, EditorRequired] public List<McpServerForm> Servers { get; set; } = [];
+
+    private bool _refreshing;
+
+    private static void Mark(McpServerForm server, string tool, bool readOnly)
+    {
+        if (readOnly)
+            server.ReadOnlyTools.Add(tool);
+        else
+            server.ReadOnlyTools.Remove(tool);
+    }
+
+    private async Task RefreshAsync()
+    {
+        _refreshing = true;
+        try
+        {
+            await Registry.RefreshAsync();
+        }
+        finally
+        {
+            _refreshing = false;
+        }
+    }
+}

@@ -16,6 +16,8 @@ public sealed class ProposalService(
     ProposalStore proposals,
     ConversationStore conversations,
     SettingsStore settings,
+    AdminNotifier notifier,
+    PlayerOutbox outbox,
     IEnumerable<QuasarOperation> operations,
     TimeProvider time
 )
@@ -30,7 +32,8 @@ public sealed class ProposalService(
         JsonElement arguments,
         Conversation conversation,
         string? reason,
-        CancellationToken token
+        CancellationToken token,
+        IReadOnlyList<string>? details = null
     )
     {
         var entry = await audit.RecordProposalAsync(
@@ -47,13 +50,23 @@ public sealed class ProposalService(
             ConversationId = conversation.Id,
             AskerSubject = conversation.OwnerSubject,
             AskerName = conversation.OwnerName,
+            Role = conversation.Role,
             PluginId = operation.PluginId,
             OperationId = operation.OperationId,
             Arguments = ResultFilter.Cap(ResultFilter.Json(arguments), 1000),
             Reason = reason,
+            Details = details?.ToList(),
             Created = time.GetUtcNow(),
         };
         proposals.Add(proposal);
+        var who = proposal.Role switch
+        {
+            AssistantRoles.Player =>
+                $"The assistant proposes `{proposal.Operation}` for the player {proposal.AskerName}",
+            AssistantRoles.Monitor => $"The monitor proposes `{proposal.Operation}`",
+            _ => $"The assistant proposes `{proposal.Operation}` for {proposal.AskerName}",
+        };
+        await notifier.PostAsync($"{who}. Approve or reject it: {notifier.ApprovalsUrl}", token);
         return proposal;
     }
 
@@ -204,6 +217,13 @@ public sealed class ProposalService(
                     Outcome = outcome,
                 }
         );
+        // A player hears it on their next request; nothing reaches them before.
+        if (decided?.Role == AssistantRoles.Player)
+            outbox.Add(
+                ConversationStore.PlayerKey(decided.AskerSubject),
+                PlayerNote(decided),
+                time.GetUtcNow()
+            );
         if (
             decided is not null
             && conversations.Get(decided.AskerSubject, decided.ConversationId) is { } conversation
@@ -220,4 +240,28 @@ public sealed class ProposalService(
     }
 
     private static string Name(ClaimsPrincipal user) => user.Identity?.Name ?? "an admin";
+
+    /// <summary>The decision in the player's words, without operation keys or proposal IDs.</summary>
+    internal static string PlayerNote(Proposal proposal)
+    {
+        var what =
+            proposal.Operation == ToolCatalog.RestoreKey
+                ? "restore of "
+                    + (
+                        proposal.Details?.FirstOrDefault(line => line.StartsWith("Grid: "))?[6..]
+                        ?? "a grid"
+                    )
+            : proposal.OperationId.StartsWith("mcp.", StringComparison.Ordinal) ? "an MCP tool call"
+            : proposal.Operation;
+        return proposal.Status switch
+        {
+            ProposalStatus.Approved =>
+                $"An admin approved your request ({what}) and it was carried out.",
+            ProposalStatus.Failed =>
+                $"An admin approved your request ({what}), but it failed: {ResultFilter.Cap(proposal.Outcome ?? "", 300)}",
+            ProposalStatus.Rejected =>
+                $"An admin turned down your request ({what}): {proposal.Outcome}",
+            _ => $"Your request ({what}) expired without an admin's decision.",
+        };
+    }
 }

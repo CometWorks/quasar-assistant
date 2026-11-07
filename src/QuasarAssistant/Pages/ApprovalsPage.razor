@@ -2,11 +2,22 @@
 @attribute [Authorize(Policy = QuasarPolicyNames.CanUseAssistant)]
 @implements IDisposable
 @inject ProposalStore Proposals
+@inject HandoverStore Handovers
 
 <PageTitle>Approvals</PageTitle>
 <div class="assistant-surface">
     <h1>Approvals</h1>
-    <p class="assistant-hint">Changes the assistant proposed. Approving runs the change as the assistant acting for the person who asked, and Quasar checks both of you again at that moment.</p>
+    <p class="assistant-hint">Changes the assistant proposed, and players the player agent handed to the admins. Approving runs the change as the assistant acting for the person or player who asked, and Quasar checks both of you again at that moment.</p>
+
+    <h2>Players waiting for an admin</h2>
+    @if (!Handovers.Open.Any())
+    {
+        <p>No player is waiting.</p>
+    }
+    @foreach (var handover in Handovers.Open.OrderBy(h => h.Created))
+    {
+        <HandoverCard @key="handover.Id" Handover="handover" />
+    }
 
     <h2>Waiting</h2>
     @if (!Proposals.Pending.Any())
@@ -28,12 +39,25 @@
     {
         <ProposalCard @key="proposal.Id" Proposal="proposal" ShowAsker="true" />
     }
+    @{ var handled = Handovers.All.Where(h => h.Handled).OrderByDescending(h => h.HandledAt).Take(20).ToList(); }
+    @foreach (var handover in handled)
+    {
+        <HandoverCard @key="handover.Id" Handover="handover" />
+    }
 </div>
 
 @code {
-    protected override void OnInitialized() => Proposals.Changed += OnChanged;
+    protected override void OnInitialized()
+    {
+        Proposals.Changed += OnChanged;
+        Handovers.Changed += OnChanged;
+    }
 
     private void OnChanged() => _ = InvokeAsync(StateHasChanged);
 
-    public void Dispose() => Proposals.Changed -= OnChanged;
+    public void Dispose()
+    {
+        Proposals.Changed -= OnChanged;
+        Handovers.Changed -= OnChanged;
+    }
 }

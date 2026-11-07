@@ -48,6 +48,12 @@ public sealed record BackendSettings
     /// <summary>Seconds a failed backend gets no requests; doubles with each further failure in a row.</summary>
     public double Cooldown { get; init; } = 60;
     public double MaxCooldown { get; init; } = 1800;
+
+    /// <summary>USD per million tokens, for showing the monitor's budget and spending in money. Null: unknown.</summary>
+    public double? InputPrice { get; init; }
+    public double? CachedInputPrice { get; init; }
+    public double? OutputPrice { get; init; }
+
     public Dictionary<string, string> Headers { get; init; } = [];
 
     /// <summary>Merged into every request body, e.g. OpenRouter's <c>provider</c> or <c>models</c>.</summary>

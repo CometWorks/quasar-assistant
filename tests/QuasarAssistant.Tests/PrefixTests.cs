@@ -61,17 +61,20 @@ public sealed class PrefixTests
         Assert.Equal(names.Order(StringComparer.Ordinal), names);
         Assert.Equal(
             [
+                "docs_search",
                 "quasar_core__config_set",
                 "quasar_core__logs_read",
                 "quasar_core__servers_start",
                 "quasar_core__servers_status",
+                "skill_read",
+                "skills_list",
             ],
             names
         );
         // The tool set maps names back to the operation.
         Assert.Equal(
             "quasar.core/servers.start",
-            tools.ByName["quasar_core__servers_start"].Operation.Key
+            tools.ByName["quasar_core__servers_start"].Operation!.Key
         );
     }
 
@@ -101,7 +104,7 @@ public sealed class PrefixTests
         await using var harness = await Harness.StartAsync([operation]);
         var tool = (
             await harness.Services.GetRequiredService<ToolCatalog>().ForAsync(new RoleSettings())
-        ).Definitions.Single();
+        ).Definitions.Single(tool => tool.Name.StartsWith("quasar_core", StringComparison.Ordinal));
         Assert.StartsWith("Sets the message of the day of a server.\n", tool.Description);
         Assert.Equal("object", tool.Schema.GetProperty("type").GetString());
         var properties = tool.Schema.GetProperty("properties");
@@ -123,7 +126,7 @@ public sealed class PrefixTests
         await using var harness = await Harness.StartAsync([Typed<SetValueRequest>("value.set")]);
         var tool = (
             await harness.Services.GetRequiredService<ToolCatalog>().ForAsync(new RoleSettings())
-        ).Definitions.Single();
+        ).Definitions.Single(tool => tool.Name == "quasar_core__value_set");
         var properties = tool.Schema.GetProperty("properties");
         Assert.Equal("{}", properties.GetProperty("value").GetRawText());
         Assert.Equal("string", properties.GetProperty("option").GetProperty("type").GetString());
@@ -162,9 +165,7 @@ public sealed class PrefixTests
         ]);
         var names = (
             await harness.Services.GetRequiredService<ToolCatalog>().ForAsync(new RoleSettings())
-        )
-            .ByName
-            .Keys;
+        ).ByName.Keys.Where(name => name.StartsWith("quasar_core", StringComparison.Ordinal));
         Assert.Equal(["quasar_core__value_set"], names);
     }
 
