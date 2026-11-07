@@ -1,7 +1,7 @@
 {
   "id": "quasar.assistant",
   "displayName": "Assistant",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "entryAssembly": "QuasarAssistant.Quasar.dll",
   "entryType": "QuasarAssistant.Quasar.AssistantQuasarPlugin",
   "projectPath": "src/QuasarAssistant.Quasar/QuasarAssistant.Quasar.csproj",
@@ -9,5 +9,5 @@
   "stylesheets": [
     "assistant.css"
   ],
-  "quasarVersion": ">=1.6.0"
+  "quasarVersion": ">=1.6.0.19"
 }

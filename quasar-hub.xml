@@ -17,11 +17,15 @@
     OpenAI-compatible API (OpenRouter, OpenAI, llama.cpp, vLLM) or the Anthropic API, with failover between them.
     Players can ask it with !ask in game and /ask on Discord about the server and their own grids, and it
     restores lost grids within the limits and rules the admins set. Admins can also ask it on Discord, where it
-    only proposes changes.
+    only proposes changes. An optional monitor watches the servers, and on a problem it gathers evidence and
+    proposes a fix within a token budget. Grid restores need the Grid Backups Magnetar plugin on the servers.
   </Description>
   <PluginKind>QuasarUiPlugin</PluginKind>
   <ProjectPath>src/QuasarAssistant.Quasar/QuasarAssistant.Quasar.csproj</ProjectPath>
   <PackageManifest>quasar-plugin.json</PackageManifest>
-  <QuasarVersion>&gt;=1.6.0</QuasarVersion>
+  <QuasarVersion>&gt;=1.6.0.19</QuasarVersion>
+  <CompanionPluginIds>
+    <CompanionPluginId>9AC2F6A8-B8A7-4250-8814-BADE62C5CF3C</CompanionPluginId>
+  </CompanionPluginIds>
   <Commit>TODO the exact plugin commit when publishing</Commit>
 </PluginData>
