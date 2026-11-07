@@ -22,6 +22,6 @@
   <PluginKind>QuasarUiPlugin</PluginKind>
   <ProjectPath>src/QuasarAssistant.Quasar/QuasarAssistant.Quasar.csproj</ProjectPath>
   <PackageManifest>quasar-plugin.json</PackageManifest>
-  <QuasarVersion>&gt;=1.6.0</QuasarVersion>
+  <QuasarVersion>&gt;=1.6.0.19</QuasarVersion>
   <Commit>TODO the exact plugin commit when publishing</Commit>
 </PluginData>
