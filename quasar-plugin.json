@@ -1,20 +1,13 @@
 {
-  "id": "todo.template-plugin",
-  "displayName": "Template Plugin",
+  "id": "quasar.assistant",
+  "displayName": "Assistant",
   "version": "0.1.0",
-  "entryAssembly": "TemplatePlugin.Quasar.dll",
-  "entryType": "TemplatePlugin.Quasar.TemplateQuasarPlugin",
-  "projectPath": "src/TemplatePlugin.Quasar/TemplatePlugin.Quasar.csproj",
-  "staticAssets": "src/TemplatePlugin/wwwroot",
+  "entryAssembly": "QuasarAssistant.Quasar.dll",
+  "entryType": "QuasarAssistant.Quasar.AssistantQuasarPlugin",
+  "projectPath": "src/QuasarAssistant.Quasar/QuasarAssistant.Quasar.csproj",
+  "staticAssets": "src/QuasarAssistant/wwwroot",
   "stylesheets": [
-    "template-plugin.css"
+    "assistant.css"
   ],
-  "quasarVersion": ">=1.1.0",
-  "companionPlugins": [
-    {
-      "id": "todo.template-plugin",
-      "projectPath": "src/TemplatePlugin.Magnetar/TemplatePlugin.Magnetar.csproj",
-      "entryAssembly": "TemplatePlugin.Magnetar.dll"
-    }
-  ]
+  "quasarVersion": ">=1.6.0"
 }

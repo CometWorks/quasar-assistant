@@ -1,0 +1,68 @@
+@page "/assistant"
+@page "/assistant/chat"
+@page "/assistant/chat/{ConversationId}"
+@attribute [Authorize(Policy = QuasarPolicyNames.CanUseAssistant)]
+@implements IDisposable
+@inject ConversationStore Conversations
+@inject NavigationManager Navigation
+
+<PageTitle>Assistant</PageTitle>
+<div class="assistant-page">
+    <nav class="assistant-conversations" aria-label="Your conversations">
+        <a class="assistant-button" href="assistant/chat"><AssistantIcon Icon="@AssistantIcons.Add" />New conversation</a>
+        <ul>
+            @foreach (var conversation in _list)
+            {
+                <li class="@(conversation.Id == ConversationId ? "assistant-current" : "")">
+                    <a href="@("assistant/chat/" + conversation.Id)" aria-current="@(conversation.Id == ConversationId ? "page" : null)">
+                        <span>@conversation.Title</span>
+                        <small>@conversation.Updated.ToUniversalTime().ToString("yyyy-MM-dd HH:mm") UTC</small>
+                    </a>
+                </li>
+            }
+        </ul>
+        <p class="assistant-hint">Conversations are deleted @Settings.Current.ConversationRetentionDays days after their last message.</p>
+    </nav>
+    <section class="assistant-page-chat">
+        @if (ConversationId is not null && _missing)
+        {
+            <p class="assistant-error" role="alert">This conversation doesn't exist or isn't yours.</p>
+        }
+        else
+        {
+            <ChatView @key="ConversationId" ConversationId="@ConversationId" Page="@(new PageContext(Navigation.Uri, null))"
+                      ConversationStarted="@(id => Navigation.NavigateTo("assistant/chat/" + id))" />
+        }
+    </section>
+</div>
+
+@code {
+    [CascadingParameter] private Task<AuthenticationState> Authentication { get; set; } = null!;
+    [Inject] private SettingsStore Settings { get; set; } = null!;
+    [Parameter] public string? ConversationId { get; set; }
+
+    private string _subject = "";
+    private IReadOnlyList<ConversationSummary> _list = [];
+    private bool _missing;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _subject = (await Authentication).User.FindFirstValue(ClaimTypes.NameIdentifier) ?? "";
+        Conversations.Changed += OnChanged;
+    }
+
+    protected override void OnParametersSet()
+    {
+        _list = Conversations.List(_subject);
+        _missing = ConversationId is not null && Conversations.Get(_subject, ConversationId) is null;
+    }
+
+    private void OnChanged(string id) =>
+        _ = InvokeAsync(() =>
+        {
+            _list = Conversations.List(_subject);
+            StateHasChanged();
+        });
+
+    public void Dispose() => Conversations.Changed -= OnChanged;
+}

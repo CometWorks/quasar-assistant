@@ -1,0 +1,142 @@
+@implements IDisposable
+@inject ConversationStore Conversations
+@inject AssistantRunner Runner
+@inject ProposalStore Proposals
+
+<div class="assistant-chat">
+    <div class="assistant-messages" role="log" aria-live="polite" aria-label="Conversation">
+        @if (_conversation is null || _conversation.Messages.Count == 0)
+        {
+            <p class="assistant-hint">Ask about your servers, their logs, players and settings. The assistant can read, and it can change things or propose changes, as the admins set it up.</p>
+        }
+        else
+        {
+            @foreach (var message in _conversation.Messages)
+            {
+                @switch (message.Role)
+                {
+                    case ChatRole.User:
+                        <div class="assistant-message assistant-message-user">@message.Text</div>
+                        break;
+                    case ChatRole.Assistant:
+                        @if (message.Text.Length > 0)
+                        {
+                            <div class="assistant-message assistant-message-answer">@message.Text</div>
+                        }
+                        @foreach (var call in message.ToolCalls ?? [])
+                        {
+                            <div class="assistant-tool-call" title="@call.Arguments"><code>@call.Name</code> @Short(call.Arguments)</div>
+                        }
+                        break;
+                    case ChatRole.Tool:
+                        @if (message.ProposalId is { } id && Proposals.Get(id) is { } proposal)
+                        {
+                            <ProposalCard Proposal="proposal" />
+                        }
+                        else
+                        {
+                            <details class="assistant-tool-result @(message.IsError ? "assistant-tool-error" : "")">
+                                <summary>@(message.IsError ? "Failed" : "Done"): <code>@message.ToolName</code></summary>
+                                <pre>@message.Text</pre>
+                            </details>
+                        }
+                        break;
+                    case ChatRole.Host:
+                        <div class="assistant-message assistant-message-host" role="status">@message.Text</div>
+                        break;
+                    case ChatRole.Error:
+                        <div class="assistant-message assistant-message-error" role="alert">@message.Text</div>
+                        break;
+                }
+            }
+        }
+        @if (_conversation is not null && Runner.IsRunning(_conversation.Id))
+        {
+            @if (Runner.Draft(_conversation.Id) is { Length: > 0 } draft)
+            {
+                <div class="assistant-message assistant-message-answer">@draft</div>
+            }
+            <div class="assistant-status" role="status">@(Runner.Status(_conversation.Id) ?? "Working")…</div>
+        }
+    </div>
+    <form class="assistant-input" @onsubmit="SendAsync">
+        <textarea @bind="_text" @bind:event="oninput" @onkeydown="OnKeyDown" rows="@(Compact ? 2 : 3)"
+                  placeholder="Ask the assistant (Ctrl+Enter sends)" aria-label="Message to the assistant" maxlength="8000"></textarea>
+        @if (_conversation is not null && Runner.IsRunning(_conversation.Id))
+        {
+            <button type="button" class="assistant-button" @onclick="() => Runner.Stop(_conversation.Id)">
+                <AssistantIcon Icon="@AssistantIcons.Stop" />Stop
+            </button>
+        }
+        else
+        {
+            <button type="submit" class="assistant-button assistant-button-primary" disabled="@string.IsNullOrWhiteSpace(_text)">
+                <AssistantIcon Icon="@AssistantIcons.Send" />Send
+            </button>
+        }
+    </form>
+</div>
+
+@code {
+    [CascadingParameter] private Task<AuthenticationState> Authentication { get; set; } = null!;
+
+    /// <summary>Null starts a new conversation with the first message.</summary>
+    [Parameter] public string? ConversationId { get; set; }
+    [Parameter] public PageContext Page { get; set; } = new(null, null);
+    [Parameter] public bool Compact { get; set; }
+    [Parameter] public EventCallback<string> ConversationStarted { get; set; }
+
+    private Conversation? _conversation;
+    private string _text = "";
+    private ClaimsPrincipal _user = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        _user = (await Authentication).User;
+        Conversations.Changed += OnChanged;
+        Proposals.Changed += OnProposalsChanged;
+    }
+
+    protected override void OnParametersSet() =>
+        _conversation = ConversationId is null ? null : Conversations.Get(Subject, ConversationId);
+
+    private string Subject => _user.FindFirstValue(ClaimTypes.NameIdentifier) ?? "";
+
+    private async Task SendAsync()
+    {
+        var text = _text.Trim();
+        if (text.Length == 0 || (_conversation is not null && Runner.IsRunning(_conversation.Id)))
+            return;
+        _text = "";
+        if (_conversation is null)
+        {
+            _conversation = Conversations.Create(Subject, _user.Identity?.Name ?? Subject);
+            await ConversationStarted.InvokeAsync(_conversation.Id);
+        }
+        // The run goes on when the page closes, off the circuit; it reports through the conversation.
+        var conversation = _conversation;
+        _ = Task.Run(() => Runner.AskAsync(conversation, _user, text, Page));
+    }
+
+    private async Task OnKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && (e.CtrlKey || e.MetaKey))
+            await SendAsync();
+    }
+
+    private static string Short(string arguments) => arguments.Length > 80 ? arguments[..80] + "…" : arguments;
+
+    private void OnChanged(string id)
+    {
+        if (id == _conversation?.Id)
+            _ = InvokeAsync(StateHasChanged);
+    }
+
+    private void OnProposalsChanged() => _ = InvokeAsync(StateHasChanged);
+
+    public void Dispose()
+    {
+        Conversations.Changed -= OnChanged;
+        Proposals.Changed -= OnProposalsChanged;
+    }
+}

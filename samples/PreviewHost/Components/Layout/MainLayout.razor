@@ -1,8 +1,0 @@
-@inherits LayoutComponentBase
-
-<div class="quasar-preview" data-theme="@(_dark ? "dark" : "light")">
-    <header class="preview-topbar"><strong>Quasar Plugin Preview</strong><NavLink href="/" Match="NavLinkMatch.All"><TemplateIcon Icon="@TemplateIcons.Dashboard" />Preview</NavLink><NavLink href="/template-plugin"><TemplateIcon Icon="@TemplateIcons.Extension" />Template Page</NavLink><button type="button" aria-label="Toggle preview theme" aria-pressed="@(_dark ? "true" : "false")" @onclick="@(() => _dark = !_dark)"><TemplateIcon Icon="@(_dark ? TemplateIcons.LightMode : TemplateIcons.DarkMode)" />@(_dark ? "Light mode" : "Dark mode")</button></header>
-    <main class="preview-content">@Body</main>
-</div>
-
-@code { private bool _dark = true; }
