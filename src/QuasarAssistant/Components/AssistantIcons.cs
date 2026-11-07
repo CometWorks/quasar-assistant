@@ -5,6 +5,10 @@ public static class AssistantIcons
 {
     public const string Assistant =
         "<path d=\"M0 0h24v24H0z\" fill=\"none\"/><path d=\"M20 2H4c-1.1 0-1.99.9-1.99 2L2 22l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zM6 9h12v2H6V9zm8 5H6v-2h8v2zm4-6H6V6h12v2z\"/>";
+
+    // Our own drawing, not a Material icon: three four-pointed stars.
+    public const string Sparkles =
+        "<path d=\"M7.5 8.5Q9.04 13.96 14.5 15.5Q9.04 17.04 7.5 22.5Q5.96 17.04 0.5 15.5Q5.96 13.96 7.5 8.5ZM16.5 4.5Q17.49 8.01 21 9Q17.49 9.99 16.5 13.5Q15.51 9.99 12 9Q15.51 8.01 16.5 4.5ZM10 2Q10.55 3.95 12.5 4.5Q10.55 5.05 10 7Q9.45 5.05 7.5 4.5Q9.45 3.95 10 2Z\"/>";
     public const string Approval =
         "<path d=\"M0 0h24v24H0z\" fill=\"none\"/><path d=\"M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z\"/>";
     public const string Settings =
