@@ -1,7 +1,7 @@
 @using QuasarAssistant.Skills
 @inject SkillLibrary Skills
 
-@* The admins' Markdown skills of one role, saved at once to skills/<role>/ in the data folder. *@
+@* The admins' Markdown skills of one role, saved as they are edited to skills/<role>/ in the data folder. *@
 <h3>Skills</h3>
 <p class="assistant-hint">@Hint</p>
 <ul class="assistant-checklist">
@@ -19,14 +19,13 @@
 }
 else
 {
-    <form class="assistant-form" @onsubmit="Save">
-        <label>Name (letters, digits, - and _) <input required maxlength="64" readonly="@(_original is not null)" @bind="_name" /></label>
+    <form class="assistant-form" @onsubmit="Done">
+        <label>Name (letters, digits, - and _) <input required maxlength="64" readonly="@(_original is not null)" @bind="_name" @bind:after="AutoSave" /></label>
         <label class="assistant-wide-field">Markdown; the first line is its summary in the list
-            <textarea class="assistant-wide" rows="14" maxlength="200000" @bind="_text"></textarea>
+            <textarea class="assistant-wide" rows="14" maxlength="200000" @bind="_text" @bind:after="AutoSave"></textarea>
         </label>
         <div class="assistant-row">
-            <button type="submit" class="assistant-button assistant-button-primary">Save skill</button>
-            <button type="button" class="assistant-button" @onclick="() => _name = null">Cancel</button>
+            <button type="submit" class="assistant-button assistant-button-primary">Done</button>
             @if (_original is not null)
             {
                 <button type="button" class="assistant-button" @onclick="Delete"><AssistantIcon Icon="@AssistantIcons.Delete" />Delete</button>
@@ -59,15 +58,32 @@ else
         _error = null;
     }
 
-    private void Save()
+    // Saved on every edit once it has a valid name; a new skill keeps that name from then on.
+    private bool Save()
     {
-        if (_name is null || !SkillLibrary.IsValidName(_name.Trim()))
+        var name = _name?.Trim() ?? "";
+        if (!SkillLibrary.IsValidName(name))
         {
             _error = "A skill name is 1 to 64 letters, digits, - or _.";
-            return;
+            return false;
         }
-        Skills.Save(Role, _name.Trim(), _text);
-        _name = null;
+        if (_original is null && Skills.Skills(Role).Any(skill => skill.Name == name))
+        {
+            _error = $"There is already a skill named {name}.";
+            return false;
+        }
+        Skills.Save(Role, name, _text);
+        _original = name;
+        _error = null;
+        return true;
+    }
+
+    private void AutoSave() => Save();
+
+    private void Done()
+    {
+        if (Save())
+            _name = null;
     }
 
     private void Delete()
