@@ -38,6 +38,9 @@ public sealed record ToolCallContext(
     /// <summary>Where the player asked, for a hand-over.</summary>
     public string? Source { get; init; }
 
+    /// <summary>The server or cluster whose lore the skill tools read; null for none.</summary>
+    public string? Lore { get; init; }
+
     public string Role => Conversation.Role;
 }
 
@@ -130,11 +133,11 @@ public sealed class ToolExecutor(
         switch (tool.Kind)
         {
             case ToolKind.SkillsList:
-                return new(ResultFilter.Cap(skills.List(run.Role), run.CapBytes));
+                return new(ResultFilter.Cap(skills.List(run.Role, run.Lore), run.CapBytes));
             case ToolKind.DocsSearch:
                 return new(
                     ResultFilter.Cap(
-                        skills.Search(run.Role, Text(arguments, "query") ?? ""),
+                        skills.Search(run.Role, Text(arguments, "query") ?? "", run.Lore),
                         run.CapBytes
                     )
                 );
@@ -147,7 +150,8 @@ public sealed class ToolExecutor(
                         && arguments.TryGetProperty("offset", out var offset)
                         && offset.TryGetInt32(out var at)
                             ? at
-                            : 0
+                            : 0,
+                        run.Lore
                     )
                 );
             case ToolKind.AskAdmin:

@@ -4,6 +4,7 @@ using System.Security.Claims;
 using System.Text;
 using Microsoft.Extensions.Logging;
 using QuasarAssistant.Llm;
+using QuasarAssistant.Lore;
 using QuasarAssistant.Settings;
 using QuasarAssistant.Storage;
 
@@ -24,6 +25,9 @@ public sealed record AskRequest(string Text, IReadOnlyList<string> HostLines)
 
     public Func<bool>? TryUseAction { get; init; }
     public string? Source { get; init; }
+
+    /// <summary>The unique name of the server or cluster asked about, whose lore the agent may read.</summary>
+    public string? Lore { get; init; }
 
     /// <summary>Uncached input and output tokens the run may use; it stops before the next model turn once they
     /// are used up. Null: no budget.</summary>
@@ -51,10 +55,15 @@ public sealed class AssistantRunner(
     ToolExecutor tools,
     ConversationStore conversations,
     MetricsLog metrics,
+    LoreStore lore,
     TimeProvider time,
     ILogger<AssistantRunner> logger
 )
 {
+    /// <summary>The <c>[host]</c> line that tells the agent the server it is asked about has lore.</summary>
+    public const string LoreLine =
+        "lore: this server has lore pages named lore/...; read them with skill_read before you answer a question about the world's story, places, factions or resources";
+
     private readonly ConcurrentDictionary<string, (int Size, SemaphoreSlim Slots)> _pools = new();
     private readonly ConcurrentDictionary<string, Run> _running = new();
 
@@ -90,6 +99,7 @@ public sealed class AssistantRunner(
         )
         {
             Asker = asker,
+            Lore = page.ServerName,
         };
         return await AskAsync(conversation, request, CancellationToken.None) is not null;
     }
@@ -106,6 +116,8 @@ public sealed class AssistantRunner(
         if (!_running.TryAdd(conversation.Id, run))
             return null;
         var cancel = token.Register(run.Stop.Cancel);
+        if (lore.Pages(request.Lore, conversation.Role).Count > 0)
+            request = request with { HostLines = [.. request.HostLines, LoreLine] };
         try
         {
             conversations.Append(
@@ -259,6 +271,7 @@ public sealed class AssistantRunner(
                     ProposeOnly = ask.ProposeOnly,
                     TryUseAction = ask.TryUseAction,
                     Source = ask.Source,
+                    Lore = ask.Lore,
                 };
                 foreach (var call in answer.ToolCalls)
                 {
