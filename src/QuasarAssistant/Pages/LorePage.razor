@@ -81,8 +81,8 @@
             }
             else if (_kind == LoreKinds.Git)
             {
-                <label class="assistant-wide-field">URL of the skill folder, such as <code>https://github.com/owner/repo/tree/main/skills/lore</code>, or a clone URL with <code>#ref:path</code>
-                    <input class="assistant-wide" @bind="_gitUrl" />
+                <label class="assistant-wide-field">URL of the skill folder: a GitHub, GitLab or Forgejo folder URL, or a clone URL with <code>#ref:path</code>
+                    <input class="assistant-wide" placeholder="https://github.com/owner/repo/tree/main/skills/lore" @bind="_gitUrl" />
                 </label>
                 <label>Access token for a private repository (@(_tokenSet ? "set; leave empty to keep it" : "none")) <input type="password" autocomplete="off" @bind="_token" /></label>
                 @if (_tokenSet)

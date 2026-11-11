@@ -35,6 +35,9 @@ admins set up. No provider or model ships with it.
   Admins add Markdown skills per role, such as a FAQ for players. The agents find and read them with
   `skills_list`, `docs_search` and `skill_read`; none of it is in the prompt until they do. Players get the
   book only when the admins allow it.
+- **Lore.** Each server and cluster can have a lore, the world's story, as free text or as a skill folder in a
+  Git repository. The agents read it as `lore/…` pages with the same tools, so players' lore questions get
+  answers from it. See [Lore](#lore).
 - **MCP servers.** Each role can have remote MCP servers (streamable HTTP; no local servers). Their tools
   appear as `mcp_<server>_<tool>`. Every call goes through a Quasar operation, so it is checked and audited:
   `quasar.assistant/mcp.read` and `mcp.call` for the admin assistant and `mcp.monitor.read` and `mcp.monitor.call`
@@ -89,6 +92,56 @@ nothing reaches them sooner. `ask_admin` hands the conversation to the admins: i
 who control servers and posted in the admin Discord channel. A player's conversation follows them across
 cluster nodes and starts over after two hours without a message.
 
+## Lore
+
+An admin with `CanEditServers` sets a lore on the **Lore** page (Settings), through the REST API or with
+`scripts/quasar-lore.py`. Without a lore nothing changes.
+
+- **Where.** One lore per server or cluster, keyed by its unique name (`cluster:` in front is optional). A
+  cluster's lore holds on all its nodes: chat from a node names the cluster. A server converted to a cluster
+  keeps its lore, as the name stays. `/ask` on Discord names no server, so it gets no lore.
+- **Free text.** Up to 200,000 characters, one page `lore/world`.
+- **Git skill.** One URL: a GitHub or GitLab tree URL, a Forgejo or Gitea `src/branch|tag|commit` URL of the
+  skill folder, or a clone URL with `#ref:path`. Only https. Every `.md` file under the folder becomes a page
+  (`SKILL.md` gives `lore/SKILL`); at most 100 files and 1 MiB together.
+- **Fetching.** With the `git` command (the Docker image has it): a shallow, partial fetch with a sparse
+  checkout, so only the skill folder is downloaded. When the lore is saved, when an admin presses Refresh
+  (`POST …/refresh`) and every 6 hours. The ref in the URL decides the revision: a branch follows its head, a
+  tag or commit stays put. The fetched commit is shown.
+- **Private repositories.** An access token, stored encrypted like the API keys and never shown again. Git gets
+  it in an HTTP header through its environment, never on the command line, and it is cut from error texts.
+  Credentials in the URL are refused; the audit log shows the token as `<redacted>`.
+- **When a fetch fails** the error shows on the Lore page and in the API (`error`), and goes to Quasar's log.
+  The assistant keeps the last good copy, or answers without lore if there never was one.
+- **How the agents use it.** Not in the prompt: a `[host]` line tells the agent that the server has lore, and
+  it lists, searches and reads the `lore/` pages with `skills_list`, `docs_search` and `skill_read` on demand,
+  so large lore costs only what is read. Each request only sees the lore of the server it came from; the admin
+  assistant sees the lore of the server its page shows.
+- **What players can see.** Players can make the agent read out anything in a lore, so a lore holds nothing
+  secret. Pages in a folder named `admin` of a Git skill are for the admin assistant only: the player agent
+  can't list, search or read them. The lore operations are on the agents' deny list, so no agent can read the
+  settings, the tokens or another server's lore.
+
+API, the same operations as the page (`quasar.assistant/lore.list`, `lore.set`, `lore.refresh`, audited):
+
+| Method | Route | Body |
+|---|---|---|
+| GET | `/api/v1/assistant/lore` | |
+| PUT | `/api/v1/assistant/lore/{target}` | `{"kind": "text", "text": "..."}` or `{"kind": "git", "gitUrl": "...", "token": "..."}` (`token` left out keeps it, `""` removes it) |
+| DELETE | `/api/v1/assistant/lore/{target}` | |
+| POST | `/api/v1/assistant/lore/{target}/refresh` | |
+
+```bash
+export QUASAR_URL=http://127.0.0.1:8080
+scripts/quasar-lore.py set-text octahedron lore.md
+scripts/quasar-lore.py set-git cluster:octahedron https://github.com/owner/repo/tree/main/skills/lore --git-token-env LORE_TOKEN
+scripts/quasar-lore.py list
+```
+
+The script takes `--url`/`QUASAR_URL` and a bearer token from `QUASAR_API_TOKEN` like `Quasar cluster`. Quasar's
+service principals carry cluster scopes only, so in practice it runs on Quasar's trusted network, such as on the
+Quasar host. It exits with 3 when a lore was saved but its skill couldn't be fetched.
+
 ## Grid restores
 
 The model only names the grid. The admins' rules fill in the placement (the original position by default),
@@ -142,10 +195,12 @@ use `/ask`. New proposals and hand-overs can be posted to the admin channel with
 | `/assistant/chat` | `CanUseAssistant` | Your conversations and a full-size chat. |
 | `/assistant/approvals` | `CanUseAssistant` | Players waiting for an admin, pending and decided proposals. Marking a hand-over handled needs `CanControlServers`. |
 | `/assistant/monitor` | `CanUseAssistant` | The monitor's open and resolved incidents, each run's answer, tokens and cost, and the budget. |
+| `/assistant/lore` | `CanEditServers` | The lore of each server and cluster: free text or a Git skill, its fetch state and errors, Refresh. |
 | `/assistant/settings` | `CanManageSecurity` | Backends, their API keys and prices; per role the backend order, modes, limits, code execution, MCP servers and skills; the sandbox's URL and token; player support and restore rules; the monitor's checks, script and budget; notifications, Discord and usage. |
 
-The plugin registers no endpoints and only the six MCP operations, which accept nothing but the assistant's
-own agents. Nothing an agent or a script can call reaches its settings.
+The plugin's only endpoints are the lore API above. Its operations are the six MCP operations, which accept
+nothing but the assistant's own agents, the Grid Backups player operations, and the three lore operations,
+which agents can't call. Nothing an agent can call reaches its settings.
 
 ## Data folder
 
@@ -162,6 +217,8 @@ Everything lives in `plugin-data/quasar.assistant/` in the Quasar data folder:
 | `player-outbox.json` | Decisions on players' proposals they haven't heard yet, kept as long as proposals. |
 | `player-usage.json` | Per player: questions left and the last refill, action times of the last day, and when the privacy notice was sent. |
 | `skills/admin/*.md`, `skills/player/*.md` | The admins' skills per role. The monitor reads the admin assistant's. |
+| `lore.json` | Each server's and cluster's lore: the text or the Git URL, and the last good fetch (commit, time, pages) with the last error. |
+| `lore-tokens.json` | Git access tokens, encrypted like the API keys. |
 | `monitor.json` | The monitor's incidents and their runs; resolved ones go after the proposal expiry. |
 | `metrics.jsonl` | One line per run: role, backends, fallovers, failures, turns, tokens (cached and processed), duration. No message text. |
 

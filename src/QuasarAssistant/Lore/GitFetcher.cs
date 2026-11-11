@@ -167,6 +167,9 @@ public sealed class GitFetcher
             if (!string.IsNullOrEmpty(token))
                 message = message.Replace(token, "<redacted>");
             var last = message.Split('\n').LastOrDefault(line => line.Trim().Length > 0)?.Trim();
+            // Hosts answer a missing and a private repository alike, by asking for credentials.
+            if (last?.Contains("could not read Username", StringComparison.Ordinal) == true)
+                last = "the repository was not found, or it is private and needs an access token";
             throw new LoreFetchException(
                 $"git {arguments[0]} failed: {(string.IsNullOrEmpty(last) ? "exit code " + process.ExitCode : last)}"
             );

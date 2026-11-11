@@ -379,3 +379,72 @@ public sealed class LoreTests
         return output;
     }
 }
+
+/// <summary>
+/// A real model answers a lore question from the Octahedron data pads. It costs money, so it runs only when a
+/// person sets <c>LORE_LIVE_API_KEY</c> (an Anthropic key; <c>LORE_LIVE_MODEL</c> overrides the model,
+/// <c>claude-haiku-5-5</c> by default, the cheapest that answers it) and passes without a call otherwise.
+/// </summary>
+public sealed class LiveLoreTests
+{
+    [Fact]
+    public async Task ARealModelAnswersFromTheLore()
+    {
+        var key = Environment.GetEnvironmentVariable("LORE_LIVE_API_KEY");
+        if (string.IsNullOrEmpty(key))
+            return;
+        await using var harness = await Harness.StartAsync(PlayerTests.Operations());
+        harness.Configure(settings =>
+            settings.WithRole(
+                AssistantRoles.Player,
+                settings.Role(AssistantRoles.Player) with
+                {
+                    Backends = ["live"],
+                }
+            ) with
+            {
+                Backends =
+                [
+                    new BackendSettings
+                    {
+                        Name = "live",
+                        Kind = BackendKind.Anthropic,
+                        BaseUrl = "https://api.anthropic.com/v1",
+                        Model =
+                            Environment.GetEnvironmentVariable("LORE_LIVE_MODEL")
+                            ?? "claude-haiku-5-5",
+                        MaxTokens = 1024,
+                    },
+                ],
+                Player = settings.Player with { Enabled = true },
+            }
+        );
+        harness.Settings.SetApiKey("live", key);
+        var lore = harness.Services.GetRequiredService<LoreStore>();
+        await lore.SetAsync(
+            new LoreSetRequest(
+                "cluster:Octahedron",
+                LoreKinds.Text,
+                """
+                # Octahedron lore
+
+                - Reactor supply memo: All our uranium shipments carry the same origin stamp: the Moon. Nobody has found a trace of it anywhere else.
+                - Guild assay ledger: Every gold claim this office has certified in fourteen years was filed on Earth.
+                - Ring miner's diary: Platinum again today. Funny how it only ever turns up out here in the ring.
+                """
+            ),
+            default
+        );
+        var ask = new PlayerAsk();
+
+        var request = ask.Game("Where can I mine uranium in this world?") with
+        {
+            Source = new QuasarChatCommandSource(QuasarChatChannel.Game, "octahedron", "node-1"),
+        };
+        await harness.Players.HandleAsync(request, default);
+
+        var answer = ask.Replies[^1];
+        File.WriteAllText(Path.Combine(Path.GetTempPath(), "lore-live-answer.txt"), answer + "\n");
+        Assert.Contains("moon", answer, StringComparison.OrdinalIgnoreCase);
+    }
+}
