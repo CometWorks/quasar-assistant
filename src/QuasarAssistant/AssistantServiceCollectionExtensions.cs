@@ -10,6 +10,7 @@ using Quasar.Plugin.Abstractions.Security;
 using QuasarAssistant.Agent;
 using QuasarAssistant.GridBackups;
 using QuasarAssistant.Llm;
+using QuasarAssistant.Lore;
 using QuasarAssistant.Mcp;
 using QuasarAssistant.Monitoring;
 using QuasarAssistant.Players;
@@ -52,6 +53,8 @@ public static class AssistantServiceCollectionExtensions
         services.AddSingleton<PlayerUsageStore>();
         services.AddSingleton<PlayerOutbox>();
         services.AddSingleton<MetricsLog>();
+        services.AddSingleton<GitFetcher>();
+        services.AddSingleton<LoreStore>();
         services.AddSingleton<SkillLibrary>();
         services.AddSingleton<McpRegistry>();
         services.AddSingleton<ToolCatalog>();
@@ -74,6 +77,7 @@ public static class AssistantServiceCollectionExtensions
         services.AddHostedService<AssistantMaintenance>();
         AddMcpOperations(services);
         services.AddGridBackupsOperations();
+        services.AddLoreOperations();
         return services;
     }
 
@@ -152,7 +156,8 @@ public static class AssistantServiceCollectionExtensions
 }
 
 /// <summary>On start: fetches the MCP servers' tools. Hourly: deletes old conversations, expires old proposals
-/// and hand-overs, and drops undelivered player notes and resolved incidents as old.</summary>
+/// and hand-overs, drops undelivered player notes and resolved incidents as old, and fetches the Git lore skills
+/// that are due.</summary>
 internal sealed class AssistantMaintenance(
     SettingsStore settings,
     ConversationStore conversations,
@@ -161,6 +166,7 @@ internal sealed class AssistantMaintenance(
     PlayerOutbox outbox,
     IncidentStore incidents,
     McpRegistry mcp,
+    LoreStore lore,
     TimeProvider time,
     ILogger<AssistantMaintenance> logger
 ) : BackgroundService
@@ -179,6 +185,7 @@ internal sealed class AssistantMaintenance(
                 handovers.Forget(expired);
                 outbox.Forget(expired);
                 incidents.Forget(expired);
+                await lore.RefreshDueAsync(token);
             }
             catch (Exception error) when (error is not OperationCanceledException)
             {

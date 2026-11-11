@@ -72,6 +72,8 @@ public sealed class AskCommand(
             Agent = request.Caller,
             TryUseAction = () => usage.TryAction(request.ConversationKey, player.Limits),
             Source = source,
+            // A cluster node's chat names the cluster, so the cluster's lore holds for all its nodes.
+            Lore = request.Source.Server,
         };
         var result = await runner.AskAsync(conversation, ask, token);
         if (result is null)

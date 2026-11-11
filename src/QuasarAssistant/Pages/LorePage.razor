@@ -1,0 +1,194 @@
+@page "/assistant/lore"
+@attribute [Authorize(Policy = QuasarPolicyNames.CanEditServers)]
+@using System.Text.Json
+@using Microsoft.Extensions.DependencyInjection
+@using Quasar.Plugin.Abstractions.Operations
+@using Quasar.Plugin.Abstractions.Servers
+@using QuasarAssistant.Lore
+@inject LoreStore Lore
+@inject IServiceProvider Services
+
+<PageTitle>Lore</PageTitle>
+<div class="assistant-surface assistant-settings">
+    <h1>Lore</h1>
+    <p class="assistant-hint">The world's story for the assistant, per server and per cluster: free text, or a skill folder in a Git repository. A cluster's lore holds on all its nodes. Players asking with <code>!ask</code> on that server get answers from it; without a lore nothing changes.</p>
+    <p class="assistant-hint">Players can read everything in a lore, so keep secrets out of it. In a Git skill, pages in a folder named <code>admin</code> are for the admin assistant only. A Git skill is fetched when you save it, when you refresh it and every @LoreStore.RefreshInterval.TotalHours hours; if a fetch fails, the assistant keeps the last good copy.</p>
+    @if (_message is not null)
+    {
+        <p class="@(_failed ? "assistant-error" : "assistant-notice")" role="@(_failed ? "alert" : "status")">@_message</p>
+    }
+
+    <div class="assistant-table-wrap">
+        <table>
+            <thead><tr><th scope="col">Server or cluster</th><th scope="col">Lore</th><th scope="col">State</th><th scope="col"><span class="assistant-visually-hidden">Actions</span></th></tr></thead>
+            <tbody>
+                @foreach (var target in Targets())
+                {
+                    var view = Lore.Get(target);
+                    <tr>
+                        <th scope="row">@target</th>
+                        <td>@Describe(view)</td>
+                        <td>
+                            @if (view?.Error is { } error)
+                            {
+                                <span class="assistant-error" role="alert">Fetch failed @When(view.AttemptedAt): @error</span>
+                            }
+                            else if (view?.Kind == LoreKinds.Git && view.Revision is { } revision)
+                            {
+                                <span>@revision[..Math.Min(12, revision.Length)], fetched @When(view.FetchedAt)</span>
+                            }
+                            @if (view is not null && view.Pages.Count > 0)
+                            {
+                                <div class="assistant-hint">@string.Join(", ", view.Pages)</div>
+                            }
+                        </td>
+                        <td>
+                            <button type="button" class="assistant-button" @onclick="() => Edit(target)">Edit</button>
+                            @if (view?.Kind == LoreKinds.Git)
+                            {
+                                <button type="button" class="assistant-button" disabled="@_busy" @onclick="() => RefreshAsync(target)">Refresh</button>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+
+    @if (_target is null)
+    {
+        <form class="assistant-form" @onsubmit="() => Edit(_newTarget)">
+            <label>Another server or cluster, by its unique name <input @bind="_newTarget" /></label>
+            <div class="assistant-row"><button type="submit" class="assistant-button">Add</button></div>
+        </form>
+    }
+    else
+    {
+        <form class="assistant-form" @onsubmit="SaveAsync">
+            <h2>Lore of @_target</h2>
+            <label>Kind
+                <select @bind="_kind">
+                    <option value="@LoreKinds.None">None</option>
+                    <option value="@LoreKinds.Text">Free text</option>
+                    <option value="@LoreKinds.Git">Skill in a Git repository</option>
+                </select>
+            </label>
+            @if (_kind == LoreKinds.Text)
+            {
+                <label class="assistant-wide-field">Lore, Markdown or plain text
+                    <textarea class="assistant-wide" rows="14" maxlength="@LoreStore.MaxTextLength" @bind="_text"></textarea>
+                </label>
+            }
+            else if (_kind == LoreKinds.Git)
+            {
+                <label class="assistant-wide-field">URL of the skill folder, such as <code>https://github.com/owner/repo/tree/main/skills/lore</code>, or a clone URL with <code>#ref:path</code>
+                    <input class="assistant-wide" @bind="_gitUrl" />
+                </label>
+                <label>Access token for a private repository (@(_tokenSet ? "set; leave empty to keep it" : "none")) <input type="password" autocomplete="off" @bind="_token" /></label>
+                @if (_tokenSet)
+                {
+                    <label class="assistant-check"><input type="checkbox" @bind="_removeToken" /> Remove the token</label>
+                }
+            }
+            <div class="assistant-row">
+                <button type="submit" class="assistant-button assistant-button-primary" disabled="@_busy">@(_busy ? "Saving..." : "Save")</button>
+                <button type="button" class="assistant-button" @onclick="() => _target = null">Cancel</button>
+            </div>
+        </form>
+    }
+</div>
+
+@code {
+    [CascadingParameter] private Task<AuthenticationState> Authentication { get; set; } = null!;
+
+    private string? _target;
+    private string _newTarget = "";
+    private string _kind = LoreKinds.None;
+    private string _text = "";
+    private string _gitUrl = "";
+    private string _token = "";
+    private bool _tokenSet;
+    private bool _removeToken;
+    private bool _busy;
+    private string? _message;
+    private bool _failed;
+
+    // The servers and clusters online now and those with a lore, by unique name.
+    private IEnumerable<string> Targets() =>
+        (Services.GetService<IQuasarServerQueries>()?.GetServers().Select(s => s.UniqueName) ?? [])
+            .Concat(Lore.List().Select(view => view.Target))
+            .DistinctBy(LoreStore.Key)
+            .Order(StringComparer.OrdinalIgnoreCase);
+
+    private static string Describe(LoreView? view) => view?.Kind switch
+    {
+        LoreKinds.Text => $"Free text, {view.Text.Length} characters",
+        LoreKinds.Git => view.GitUrl,
+        _ => "None",
+    };
+
+    private static string When(DateTimeOffset? time) => time?.UtcDateTime.ToString("yyyy-MM-dd HH:mm 'UTC'") ?? "";
+
+    private void Edit(string target)
+    {
+        if (LoreStore.Key(target) is null)
+            return;
+        var view = Lore.Get(target);
+        _target = view?.Target ?? target.Trim();
+        _kind = view?.Kind ?? LoreKinds.Text;
+        _text = view?.Text ?? "";
+        _gitUrl = view?.GitUrl ?? "";
+        _token = "";
+        _tokenSet = view?.TokenSet ?? false;
+        _removeToken = false;
+        _newTarget = "";
+        _message = null;
+    }
+
+    private async Task SaveAsync()
+    {
+        var token = _removeToken ? "" : _token.Length > 0 ? _token : null;
+        if (await RunAsync(LoreOperations.Set, new LoreSetRequest(_target!, _kind, _text, _gitUrl, token)) is { } view && view.Error is { } error)
+            Fail("Saved, but the skill could not be fetched: " + error);
+        else if (!_failed)
+            _target = null;
+    }
+
+    private Task RefreshAsync(string target) => RunAsync(LoreOperations.Refresh, new LoreTargetRequest(target));
+
+    // Through core's dispatcher, as the API does: the same checks and an audit entry.
+    private async Task<LoreView?> RunAsync(string operation, object request)
+    {
+        _busy = true;
+        _message = null;
+        _failed = false;
+        try
+        {
+            var user = (await Authentication).User;
+            await using var scope = Services.CreateAsyncScope();
+            var result = await scope.ServiceProvider.GetRequiredService<IQuasarOperationDispatcher>().DispatchAsync(
+                new QuasarOperationContext(user, scope.ServiceProvider),
+                AssistantServiceCollectionExtensions.PluginId,
+                operation,
+                JsonSerializer.SerializeToElement(request, JsonSerializerOptions.Web),
+                CancellationToken.None);
+            if (result.Error is not null)
+            {
+                Fail(result.Error);
+                return null;
+            }
+            _message = operation == LoreOperations.Refresh ? "Fetched again." : "Saved.";
+            return Lore.Get((request as LoreSetRequest)?.Target ?? ((LoreTargetRequest)request).Target);
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private void Fail(string message)
+    {
+        _message = message;
+        _failed = true;
+    }
+}

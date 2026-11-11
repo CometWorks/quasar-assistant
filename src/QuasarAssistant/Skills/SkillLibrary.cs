@@ -1,5 +1,6 @@
 using System.Text;
 using System.Text.RegularExpressions;
+using QuasarAssistant.Lore;
 using QuasarAssistant.Settings;
 using QuasarAssistant.Storage;
 
@@ -16,10 +17,15 @@ public sealed record SkillPage(string Name, string Text)
 }
 
 /// <summary>
-/// The knowledge the agents read through tools: the Quasar book shipped in the plugin, and the admins' Markdown
-/// skills per role in <c>skills/&lt;role&gt;/*.md</c> of the data folder. Text only; nothing here runs.
+/// The knowledge the agents read through tools: the Quasar book shipped in the plugin, the admins' Markdown
+/// skills per role in <c>skills/&lt;role&gt;/*.md</c> of the data folder, and the lore of the server or cluster
+/// asked about (<paramref name="lore"/>). Text only; nothing here runs.
 /// </summary>
-public sealed partial class SkillLibrary(AssistantPaths paths, SettingsStore settings)
+public sealed partial class SkillLibrary(
+    AssistantPaths paths,
+    SettingsStore settings,
+    LoreStore lore
+)
 {
     public const string BookPrefix = "quasar-book/";
     private const int MaxSearchPages = 20;
@@ -63,18 +69,28 @@ public sealed partial class SkillLibrary(AssistantPaths paths, SettingsStore set
             File.Delete(FilePath(role, name));
     }
 
-    /// <summary>What the role may read: its skills, and the book for admins or when the admins open it to players.</summary>
-    public IReadOnlyList<SkillPage> PagesFor(string role) =>
-        WithBook(role) ? [.. Skills(role), .. Book] : Skills(role);
+    /// <summary>What the role may read: its skills, the lore of <paramref name="loreTarget"/> (a server's or
+    /// cluster's unique name), and the book for admins or when the admins open it to players.</summary>
+    public IReadOnlyList<SkillPage> PagesFor(string role, string? loreTarget = null) =>
+        [.. Skills(role), .. lore.Pages(loreTarget, role), .. WithBook(role) ? Book : []];
 
     /// <summary><c>skills_list</c>: name and first line per skill, and the book's contents for those who read it.</summary>
-    public string List(string role)
+    public string List(string role, string? loreTarget = null)
     {
         var text = new StringBuilder();
         var skills = Skills(role);
         text.Append(skills.Count == 0 ? "No skills written by the admins.\n" : "Skills:\n");
         foreach (var page in skills)
             text.Append($"- {page.Name}: {page.Summary}\n");
+        var lorePages = lore.Pages(loreTarget, role);
+        if (lorePages.Count > 0)
+        {
+            text.Append(
+                "\nThe lore of this server's world (story, places, factions, resources):\n"
+            );
+            foreach (var page in lorePages)
+                text.Append($"- {page.Name}: {page.Summary}\n");
+        }
         if (WithBook(role))
         {
             text.Append($"\nThe Quasar book, pages named {BookPrefix}<Page>:\n");
@@ -87,7 +103,7 @@ public sealed partial class SkillLibrary(AssistantPaths paths, SettingsStore set
     }
 
     /// <summary><c>docs_search</c>: pages holding every word of the query, most hits first, with a few lines each.</summary>
-    public string Search(string role, string query)
+    public string Search(string role, string query, string? loreTarget = null)
     {
         var words = query
             .Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
@@ -95,7 +111,7 @@ public sealed partial class SkillLibrary(AssistantPaths paths, SettingsStore set
             .ToList();
         if (words.Count == 0)
             return "Give one or more words to search for.";
-        var hits = PagesFor(role)
+        var hits = PagesFor(role, loreTarget)
             .Select(page => (Page: page, Count: words.Sum(word => Count(page.Text, word))))
             .Where(hit =>
                 words.All(word => hit.Page.Text.Contains(word, StringComparison.OrdinalIgnoreCase))
@@ -127,9 +143,9 @@ public sealed partial class SkillLibrary(AssistantPaths paths, SettingsStore set
     }
 
     /// <summary><c>skill_read</c>: one page from a character offset, cut to the result cap.</summary>
-    public string Read(string role, string name, int offset)
+    public string Read(string role, string name, int offset, string? loreTarget = null)
     {
-        var page = PagesFor(role).FirstOrDefault(p => p.Name == name.Trim());
+        var page = PagesFor(role, loreTarget).FirstOrDefault(p => p.Name == name.Trim());
         if (page is null)
             return $"There is no page named {name}. skills_list lists them.";
         offset = Math.Clamp(offset, 0, page.Text.Length);
