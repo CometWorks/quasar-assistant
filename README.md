@@ -198,6 +198,10 @@ use `/ask`. New proposals and hand-overs can be posted to the admin channel with
 | `/assistant/lore` | `CanEditServers` | The lore of each server and cluster: free text or a Git skill, its fetch state and errors, Refresh. |
 | `/assistant/settings` | `CanManageSecurity` | Backends, their API keys and prices; per role the backend order, modes, limits, code execution, MCP servers and skills; the sandbox's URL and token; player support and restore rules; the monitor's checks, script and budget; notifications, Discord and usage. |
 
+The chat shows the assistant's answers and the monitor's runs as Markdown: headings, lists, emphasis, code,
+links and tables. HTML in an answer shows as text, and links open only http, https and mailto URLs and Quasar's
+own pages.
+
 The plugin's only endpoints are the lore API above. Its operations are the six MCP operations, which accept
 nothing but the assistant's own agents, the Grid Backups player operations, and the three lore operations,
 which agents can't call. Nothing an agent can call reaches its settings.
@@ -242,6 +246,10 @@ them and the Grid Backups working copy to a test host and starts `rig.py` there.
 headless game client, an isolated Quasar and a scripted stub model, and prints PASS or FAIL for seven steps:
 `!ask`, an automatic restore, a proposal and its approval, an undo, the admin drawer, the cached prefix and a
 grid name carrying an injection.
+
+`chat_shots.py` takes screenshots of the chat with canned Markdown answers from a stub model, on the
+Assistant page and in the drawer, dark and light, on a local Quasar with no game server. It is for before and
+after shots of UI changes.
 
 `smoke.py` asks a real model, by hand before a release. On a setup left running with `--keep`,
 `smoke.py configure` turns the stub backend into a real one without a key. Someone pastes the key on the

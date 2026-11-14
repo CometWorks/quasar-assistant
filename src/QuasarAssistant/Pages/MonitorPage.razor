@@ -55,7 +55,7 @@
             {
                 <details open="@(run == incident.Runs[^1])">
                     <summary>@Utc(run.Time): @run.Outcome, @run.Tokens.ToString("N0") tokens@(run.Usd is { } usd ? $", about USD {usd:0.000}" : "")@(run.Tools.Count > 0 ? ", tools: " + string.Join(", ", run.Tools) : "")</summary>
-                    <div class="assistant-message assistant-message-answer">@run.Answer</div>
+                    <div class="assistant-message assistant-message-answer assistant-md">@((MarkupString)Markdown.ToHtml(run.Answer))</div>
                 </details>
             }
         </article>;

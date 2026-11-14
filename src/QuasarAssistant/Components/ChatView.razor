@@ -22,7 +22,7 @@
                     case ChatRole.Assistant:
                         @if (message.Text.Length > 0)
                         {
-                            <div class="assistant-message assistant-message-answer">@message.Text</div>
+                            <div class="assistant-message assistant-message-answer assistant-md">@((MarkupString)Markdown.ToHtml(message.Text))</div>
                         }
                         @foreach (var call in message.ToolCalls ?? [])
                         {
@@ -55,7 +55,7 @@
         {
             @if (Runner.Draft(_conversation.Id) is { Length: > 0 } draft)
             {
-                <div class="assistant-message assistant-message-answer">@draft</div>
+                <div class="assistant-message assistant-message-answer assistant-md">@((MarkupString)Markdown.ToHtml(draft))</div>
             }
             <div class="assistant-status" role="status">@(Runner.Status(_conversation.Id) ?? "Working")…</div>
         }
