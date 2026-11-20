@@ -5,6 +5,7 @@
     quasar-lore.py show TARGET
     quasar-lore.py set-text TARGET FILE      (FILE or - for stdin)
     quasar-lore.py set-git TARGET URL [--git-token-env NAME | --remove-git-token]
+    quasar-lore.py set-folder TARGET FOLDER  (a full path on the Quasar host)
     quasar-lore.py refresh TARGET
     quasar-lore.py clear TARGET
 
@@ -17,7 +18,7 @@ environment variable --token-env names (QUASAR_API_TOKEN by default), as for
 variable --git-token-env names, never from the command line.
 
 Exit codes: 0 done, 1 Quasar refused the request, 2 bad usage, 3 the lore was
-saved but its Git skill could not be fetched.
+saved but its skill could not be fetched or read.
 """
 
 import argparse
@@ -44,6 +45,9 @@ def main() -> int:
     text = commands.add_parser("set-text")
     text.add_argument("target")
     text.add_argument("file")
+    folder = commands.add_parser("set-folder")
+    folder.add_argument("target")
+    folder.add_argument("folder")
     git = commands.add_parser("set-git")
     git.add_argument("target")
     git.add_argument("git_url")
@@ -74,6 +78,8 @@ def main() -> int:
         return report(call(args, "POST", path + "/refresh"))
     if args.command == "set-text":
         body = {"kind": "text", "text": read(args.file)}
+    elif args.command == "set-folder":
+        body = {"kind": "folder", "folder": args.folder}
     else:
         body = {"kind": "git", "gitUrl": args.git_url}
         if args.remove_git_token:
@@ -95,7 +101,7 @@ def read(file: str) -> str:
 def report(view: dict) -> int:
     print(json.dumps(view, indent=2))
     if view.get("error"):
-        print(f"The Git skill could not be fetched: {view['error']}", file=sys.stderr)
+        print(f"The skill could not be fetched: {view['error']}", file=sys.stderr)
         return 3
     return 0
 

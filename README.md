@@ -104,6 +104,11 @@ An admin with `CanEditServers` sets a lore on the **Lore** page (Settings), thro
 - **Git skill.** One URL: a GitHub or GitLab tree URL, a Forgejo or Gitea `src/branch|tag|commit` URL of the
   skill folder, or a clone URL with `#ref:path`. Only https. Every `.md` file under the folder becomes a page
   (`SKILL.md` gives `lore/SKILL`); at most 100 files and 1 MiB together.
+- **Folder on the Quasar host.** The full path of a skill folder that Quasar can read, for a repository the
+  host has checked out itself, such as a private one a deployment pushes there. Pages and limits are those of
+  a Git skill. The folder is read when the lore is saved, on Refresh and every 6 hours, so a deployment that
+  changes it calls Refresh. The commit checked out there is shown when the folder is in a Git work tree. Only
+  admins who may edit servers can set it, and it reads `.md` files only.
 - **Fetching.** With the `git` command (the Docker image has it): a shallow, partial fetch with a sparse
   checkout, so only the skill folder is downloaded. When the lore is saved, when an admin presses Refresh
   (`POST …/refresh`) and every 6 hours. The ref in the URL decides the revision: a branch follows its head, a
@@ -118,7 +123,7 @@ An admin with `CanEditServers` sets a lore on the **Lore** page (Settings), thro
   so large lore costs only what is read. Each request only sees the lore of the server it came from; the admin
   assistant sees the lore of the server its page shows.
 - **What players can see.** Players can make the agent read out anything in a lore, so a lore holds nothing
-  secret. Pages in a folder named `admin` of a Git skill are for the admin assistant only: the player agent
+  secret. Pages in a folder named `admin` of a Git or folder skill are for the admin assistant only: the player agent
   can't list, search or read them. The lore operations are on the agents' deny list, so no agent can read the
   settings, the tokens or another server's lore.
 
@@ -127,7 +132,7 @@ API, the same operations as the page (`quasar.assistant/lore.list`, `lore.set`, 
 | Method | Route | Body |
 |---|---|---|
 | GET | `/api/v1/assistant/lore` | |
-| PUT | `/api/v1/assistant/lore/{target}` | `{"kind": "text", "text": "..."}` or `{"kind": "git", "gitUrl": "...", "token": "..."}` (`token` left out keeps it, `""` removes it) |
+| PUT | `/api/v1/assistant/lore/{target}` | `{"kind": "text", "text": "..."}`, `{"kind": "git", "gitUrl": "...", "token": "..."}` (`token` left out keeps it, `""` removes it) or `{"kind": "folder", "folder": "/full/path"}` |
 | DELETE | `/api/v1/assistant/lore/{target}` | |
 | POST | `/api/v1/assistant/lore/{target}/refresh` | |
 

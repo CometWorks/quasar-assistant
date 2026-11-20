@@ -227,6 +227,61 @@ public sealed class LoreTests
     }
 
     [Fact]
+    public async Task FolderSkillIsReadAgainOnRefreshAndKeepsAdminPagesFromPlayers()
+    {
+        var (harness, lore) = await StartAsync();
+        await using var _h = harness;
+        var repo = Repository(
+            harness.Folder,
+            ("skills/world/SKILL.md", "# Octahedron lore\n\nSeven stations.\n"),
+            ("skills/admin/SKILL.md", "# Admin notes\n\nThe hidden vault is at 1,2,3.\n"),
+            ("README.md", "Not part of the skill.\n")
+        );
+        var folder = Path.Combine(repo.Path, "skills");
+
+        var view = await lore.SetAsync(
+            new LoreSetRequest("alpha", LoreKinds.Folder, Folder: folder),
+            default
+        );
+
+        Assert.NotNull(view);
+        Assert.Null(view.Error);
+        Assert.Equal(folder, view.Folder);
+        Assert.Equal(repo.Commit, view.Revision);
+        Assert.Equal(
+            ["lore/admin/SKILL (admins only)", "lore/world/SKILL"],
+            view.Pages.Order(StringComparer.Ordinal)
+        );
+        var skills = harness.Services.GetRequiredService<SkillLibrary>();
+        Assert.DoesNotContain("lore/admin", skills.List(AssistantRoles.Player, "alpha"));
+        Assert.Contains(
+            "hidden vault",
+            skills.Read(AssistantRoles.Admin, "lore/admin/SKILL", 0, "alpha")
+        );
+
+        // A deployment changes the folder and calls Refresh.
+        File.WriteAllText(
+            Path.Combine(folder, "world", "SKILL.md"),
+            "# Octahedron lore\n\nEight stations.\n"
+        );
+        view = await lore.RefreshAsync("alpha", default);
+        Assert.Null(view!.Error);
+        Assert.Contains(
+            "Eight stations",
+            skills.Read(AssistantRoles.Player, "lore/world/SKILL", 0, "alpha")
+        );
+
+        // A folder that went away is reported, and the last good copy stays.
+        Directory.Move(folder, folder + "-gone");
+        view = await lore.RefreshAsync("alpha", default);
+        Assert.Contains("There is no folder", view!.Error);
+        Assert.Contains(
+            "Eight stations",
+            skills.Read(AssistantRoles.Player, "lore/world/SKILL", 0, "alpha")
+        );
+    }
+
+    [Fact]
     public async Task FailingFetchIsReportedKeepsTheLastGoodCopyAndTheAssistantAnswers()
     {
         var (harness, lore) = await StartAsync();
@@ -308,6 +363,7 @@ public sealed class LoreTests
     [InlineData(LoreKinds.Text, "", null)]
     [InlineData(LoreKinds.Git, null, "http://example.com/a/b")]
     [InlineData("pdf", null, null)]
+    [InlineData(LoreKinds.Folder, null, null)]
     public async Task InvalidInputIsRefused(string kind, string? text, string? gitUrl)
     {
         var (harness, lore) = await StartAsync();
