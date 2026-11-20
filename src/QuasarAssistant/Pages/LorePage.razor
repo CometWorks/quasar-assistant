@@ -11,8 +11,8 @@
 <PageTitle>Lore</PageTitle>
 <div class="assistant-surface assistant-settings">
     <h1>Lore</h1>
-    <p class="assistant-hint">The world's story for the assistant, per server and per cluster: free text, or a skill folder in a Git repository. A cluster's lore holds on all its nodes. Players asking with <code>!ask</code> on that server get answers from it; without a lore nothing changes.</p>
-    <p class="assistant-hint">Players can read everything in a lore, so keep secrets out of it. In a Git skill, pages in a folder named <code>admin</code> are for the admin assistant only. A Git skill is fetched when you save it, when you refresh it and every @LoreStore.RefreshInterval.TotalHours hours; if a fetch fails, the assistant keeps the last good copy.</p>
+    <p class="assistant-hint">The world's story for the assistant, per server and per cluster: free text, a skill folder in a Git repository, or a skill folder on the Quasar host. A cluster's lore holds on all its nodes. Players asking with <code>!ask</code> on that server get answers from it; without a lore nothing changes.</p>
+    <p class="assistant-hint">Players can read everything in a lore, so keep secrets out of it. In a skill, pages in a folder named <code>admin</code> are for the admin assistant only. A skill is fetched or read when you save it, when you refresh it and every @LoreStore.RefreshInterval.TotalHours hours; if a fetch fails, the assistant keeps the last good copy.</p>
     @if (_message is not null)
     {
         <p class="@(_failed ? "assistant-error" : "assistant-notice")" role="@(_failed ? "alert" : "status")">@_message</p>
@@ -33,9 +33,13 @@
                             {
                                 <span class="assistant-error" role="alert">Fetch failed @When(view.AttemptedAt): @error</span>
                             }
-                            else if (view?.Kind == LoreKinds.Git && view.Revision is { } revision)
+                            else if (view?.Kind is LoreKinds.Git or LoreKinds.Folder && view.Revision is { } revision)
                             {
                                 <span>@revision[..Math.Min(12, revision.Length)], fetched @When(view.FetchedAt)</span>
+                            }
+                            else if (view?.Kind == LoreKinds.Folder && view.FetchedAt is not null)
+                            {
+                                <span>Read @When(view.FetchedAt)</span>
                             }
                             @if (view is not null && view.Pages.Count > 0)
                             {
@@ -44,7 +48,7 @@
                         </td>
                         <td>
                             <button type="button" class="assistant-button" @onclick="() => Edit(target)">Edit</button>
-                            @if (view?.Kind == LoreKinds.Git)
+                            @if (view?.Kind is LoreKinds.Git or LoreKinds.Folder)
                             {
                                 <button type="button" class="assistant-button" disabled="@_busy" @onclick="() => RefreshAsync(target)">Refresh</button>
                             }
@@ -71,6 +75,7 @@
                     <option value="@LoreKinds.None">None</option>
                     <option value="@LoreKinds.Text">Free text</option>
                     <option value="@LoreKinds.Git">Skill in a Git repository</option>
+                    <option value="@LoreKinds.Folder">Skill folder on the Quasar host</option>
                 </select>
             </label>
             @if (_kind == LoreKinds.Text)
@@ -90,6 +95,12 @@
                     <label class="assistant-check"><input type="checkbox" @bind="_removeToken" /> Remove the token</label>
                 }
             }
+            else if (_kind == LoreKinds.Folder)
+            {
+                <label class="assistant-wide-field">Full path of the skill folder on the Quasar host. Every <code>.md</code> file under it becomes a page.
+                    <input class="assistant-wide" placeholder="/srv/lore/skills" @bind="_folder" />
+                </label>
+            }
             <div class="assistant-row">
                 <button type="submit" class="assistant-button assistant-button-primary" disabled="@_busy">@(_busy ? "Saving..." : "Save")</button>
                 <button type="button" class="assistant-button" @onclick="() => _target = null">Cancel</button>
@@ -106,6 +117,7 @@
     private string _kind = LoreKinds.None;
     private string _text = "";
     private string _gitUrl = "";
+    private string _folder = "";
     private string _token = "";
     private bool _tokenSet;
     private bool _removeToken;
@@ -124,6 +136,7 @@
     {
         LoreKinds.Text => $"Free text, {view.Text.Length} characters",
         LoreKinds.Git => view.GitUrl,
+        LoreKinds.Folder => view.Folder,
         _ => "None",
     };
 
@@ -138,6 +151,7 @@
         _kind = view?.Kind ?? LoreKinds.Text;
         _text = view?.Text ?? "";
         _gitUrl = view?.GitUrl ?? "";
+        _folder = view?.Folder ?? "";
         _token = "";
         _tokenSet = view?.TokenSet ?? false;
         _removeToken = false;
@@ -148,7 +162,7 @@
     private async Task SaveAsync()
     {
         var token = _removeToken ? "" : _token.Length > 0 ? _token : null;
-        if (await RunAsync(LoreOperations.Set, new LoreSetRequest(_target!, _kind, _text, _gitUrl, token)) is { } view && view.Error is { } error)
+        if (await RunAsync(LoreOperations.Set, new LoreSetRequest(_target!, _kind, _text, _gitUrl, token, _folder)) is { } view && view.Error is { } error)
             Fail("Saved, but the skill could not be fetched: " + error);
         else if (!_failed)
             _target = null;

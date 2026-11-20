@@ -15,7 +15,8 @@ public sealed record LoreBody(
     string Kind,
     string? Text = null,
     string? GitUrl = null,
-    string? Token = null
+    string? Token = null,
+    string? Folder = null
 );
 
 /// <summary>
@@ -61,7 +62,7 @@ public static class LoreOperations
                 AgentAccess = QuasarAgentAccess.Denied,
                 Deadline = FetchDeadline,
                 Description =
-                    "Sets a server's or cluster's lore for the assistant: free text, a Git skill URL, or none.",
+                    "Sets a server's or cluster's lore for the assistant: free text, a Git skill URL, a folder on the Quasar host, or none.",
             }
         );
         services.AddQuasarOperation<LoreTargetRequest, LoreView?>(
@@ -74,14 +75,15 @@ public static class LoreOperations
                     .RefreshAsync(request.Target, token)
                 ?? throw new QuasarOperationException(
                     404,
-                    "That server or cluster has no Git lore."
+                    "That server or cluster has no Git or folder lore."
                 ),
             new QuasarOperationMetadata
             {
                 AgentAccess = QuasarAgentAccess.Denied,
                 Reversal = QuasarReversal.NothingToReverse,
                 Deadline = FetchDeadline,
-                Description = "Fetches a server's or cluster's Git lore skill again.",
+                Description =
+                    "Fetches a server's or cluster's Git lore skill, or reads its folder, again.",
             }
         );
         return services;
@@ -103,7 +105,14 @@ public static class LoreOperations
                 Dispatch(
                     http,
                     Set,
-                    new LoreSetRequest(target, body.Kind, body.Text, body.GitUrl, body.Token)
+                    new LoreSetRequest(
+                        target,
+                        body.Kind,
+                        body.Text,
+                        body.GitUrl,
+                        body.Token,
+                        body.Folder
+                    )
                 )
         );
         routes.MapDelete(

@@ -3,8 +3,8 @@ using System.Text;
 
 namespace QuasarAssistant.Lore;
 
-/// <summary>What a fetch found: the commit and the Markdown files of the skill folder by relative path.</summary>
-public sealed record GitSkill(string Revision, IReadOnlyList<(string Path, string Text)> Files);
+/// <summary>What a fetch found: the commit (null for a local folder outside Git) and the Markdown files of the skill folder by relative path.</summary>
+public sealed record GitSkill(string? Revision, IReadOnlyList<(string Path, string Text)> Files);
 
 /// <summary>
 /// Fetches one folder of a Git repository with the <c>git</c> command: a shallow, partial fetch of one commit with
@@ -62,6 +62,33 @@ public sealed class GitFetcher
         }
     }
 
+    /// <summary>Reads a skill folder on the Quasar host, with the limits of a fetched one. The revision is the
+    /// commit checked out there when the folder is in a Git work tree, else null.</summary>
+    public async Task<GitSkill> ReadLocalAsync(string folder, CancellationToken cancel)
+    {
+        if (!Directory.Exists(folder))
+            throw new LoreFetchException($"There is no folder {folder} on the Quasar host.");
+        List<(string, string)> files;
+        try
+        {
+            files = ReadFiles(folder, folder, folder);
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+        {
+            throw new LoreFetchException($"The folder {folder} could not be read: {error.Message}");
+        }
+        string? revision = null;
+        using var limit = CancellationTokenSource.CreateLinkedTokenSource(cancel);
+        limit.CancelAfter(Timeout);
+        try
+        {
+            revision = (await RunAsync(folder, null, limit.Token, "rev-parse", "HEAD")).Trim();
+        }
+        catch (LoreFetchException) { }
+        catch (OperationCanceledException) when (!cancel.IsCancellationRequested) { }
+        return new(revision, files);
+    }
+
     private static List<(string, string)> ReadFolder(string work, string path, string revision)
     {
         var top = Path.GetFullPath(work);
@@ -70,6 +97,11 @@ public sealed class GitFetcher
             throw new LoreFetchException(
                 $"There is no folder {path} in the repository at {revision[..Math.Min(12, revision.Length)]}."
             );
+        return ReadFiles(top, root, path.Length > 0 ? path : "/");
+    }
+
+    private static List<(string, string)> ReadFiles(string top, string root, string shown)
+    {
         var gitFolder = Path.Combine(top, ".git");
         var files = Directory
             .EnumerateFiles(root, "*.md", SearchOption.AllDirectories)
@@ -77,9 +109,7 @@ public sealed class GitFetcher
             .Order(StringComparer.Ordinal)
             .ToList();
         if (files.Count == 0)
-            throw new LoreFetchException(
-                $"The folder {(path.Length > 0 ? path : "/")} has no Markdown (.md) files."
-            );
+            throw new LoreFetchException($"The folder {shown} has no Markdown (.md) files.");
         if (files.Count > MaxFiles)
             throw new LoreFetchException(
                 $"The skill has {files.Count} Markdown files; at most {MaxFiles} are read."

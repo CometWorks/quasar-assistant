@@ -11,6 +11,7 @@ public static class LoreKinds
     public const string None = "none";
     public const string Text = "text";
     public const string Git = "git";
+    public const string Folder = "folder";
 }
 
 /// <summary>A lore page; <paramref name="AdminOnly"/> pages (under an <c>admin/</c> folder of a skill) are never
@@ -26,7 +27,10 @@ public sealed record LoreEntry
     public string Text { get; init; } = "";
     public string GitUrl { get; init; } = "";
 
-    /// <summary>The last good fetch of a Git skill: its commit and pages. Kept when a later fetch fails.</summary>
+    /// <summary>The skill folder on the Quasar host, for the kind folder.</summary>
+    public string Folder { get; init; } = "";
+
+    /// <summary>The last good fetch of a Git skill or read of a folder: its commit and pages. Kept when a later fetch fails.</summary>
     public string? Revision { get; init; }
     public DateTimeOffset? FetchedAt { get; init; }
     public List<LorePage> Fetched { get; init; } = [];
@@ -47,7 +51,8 @@ public sealed record LoreView(
     DateTimeOffset? FetchedAt,
     DateTimeOffset? AttemptedAt,
     string? Error,
-    IReadOnlyList<string> Pages
+    IReadOnlyList<string> Pages,
+    string Folder = ""
 );
 
 /// <param name="Token">A Git access token for a private repository: null keeps the stored one, empty removes it.</param>
@@ -56,14 +61,16 @@ public sealed record LoreSetRequest(
     string Kind,
     string? Text = null,
     string? GitUrl = null,
-    string? Token = null
+    string? Token = null,
+    string? Folder = null
 );
 
 public sealed record LoreTargetRequest(string Target);
 
 /// <summary>
 /// The lore of each server and cluster, for the agents to read as <c>lore/…</c> skill pages. A cluster has one lore
-/// for all its nodes: chat from a node names the cluster. Free text is one page; a Git skill is fetched when it is
+/// for all its nodes: chat from a node names the cluster. Free text is one page; a Git skill or a folder on the
+/// Quasar host is read when it is
 /// set, when an admin refreshes it and every <see cref="RefreshInterval"/>, and its last good copy stays in use
 /// while a fetch fails. Tokens are kept in <c>lore-tokens.json</c>, encrypted like the backends' API keys.
 /// </summary>
@@ -220,12 +227,38 @@ public sealed class LoreStore
                     SaveEntries();
                 }
                 return await RefreshAsync(target, cancel);
+            case LoreKinds.Folder:
+                var folder = (request.Folder ?? "").Trim();
+                if (!Path.IsPathFullyQualified(folder))
+                    throw new ArgumentException(
+                        "Give the skill folder as a full path on the Quasar host, such as /srv/lore/skills."
+                    );
+                lock (_lock)
+                {
+                    var previous = _entries.GetValueOrDefault(key);
+                    _entries[key] =
+                        previous is { Kind: LoreKinds.Folder } && previous.Folder == folder
+                            ? previous with
+                            {
+                                Target = target,
+                            }
+                            : new LoreEntry
+                            {
+                                Target = target,
+                                Kind = LoreKinds.Folder,
+                                Folder = folder,
+                            };
+                    SaveEntries();
+                    if (_tokens.Remove(key))
+                        SaveTokens();
+                }
+                return await RefreshAsync(target, cancel);
             default:
-                throw new ArgumentException("The kind is none, text or git.");
+                throw new ArgumentException("The kind is none, text, git or folder.");
         }
     }
 
-    /// <summary>Fetches a Git skill again. Null when the target has no Git skill.</summary>
+    /// <summary>Fetches a Git skill or reads a folder again. Null when the target has neither.</summary>
     public async Task<LoreView?> RefreshAsync(string target, CancellationToken cancel)
     {
         var key = Key(target);
@@ -233,19 +266,22 @@ public sealed class LoreStore
         string? token = null;
         lock (_lock)
         {
-            if (key is null || !_entries.TryGetValue(key, out entry) || entry.Kind != LoreKinds.Git)
+            if (key is null || !_entries.TryGetValue(key, out entry) || !Fetches(entry))
                 return null;
             if (_tokens.TryGetValue(key, out var stored))
                 token = _protector.Unprotect(stored);
         }
         GitSkill? skill = null;
-        string? failure;
+        string? failure = null;
         await _fetching.WaitAsync(cancel);
         try
         {
-            if (!GitSkillUrl.TryParse(entry.GitUrl, AllowFileUrls, out var url, out failure))
+            if (entry.Kind == LoreKinds.Folder)
+                skill = await _git.ReadLocalAsync(entry.Folder, cancel);
+            else if (!GitSkillUrl.TryParse(entry.GitUrl, AllowFileUrls, out var url, out failure))
                 throw new LoreFetchException(failure!);
-            skill = await _git.FetchAsync(url!, token, _workRoot, cancel);
+            else
+                skill = await _git.FetchAsync(url!, token, _workRoot, cancel);
             failure = null;
         }
         catch (LoreFetchException error)
@@ -262,8 +298,9 @@ public sealed class LoreStore
             // The admin may have changed or removed it meanwhile.
             if (
                 !_entries.TryGetValue(key, out var current)
-                || current.Kind != LoreKinds.Git
+                || current.Kind != entry.Kind
                 || current.GitUrl != entry.GitUrl
+                || current.Folder != entry.Folder
             )
                 return Get(target);
             current = skill is null
@@ -292,19 +329,21 @@ public sealed class LoreStore
         }
     }
 
-    /// <summary>Fetches the Git skills last tried more than <see cref="RefreshInterval"/> ago.</summary>
+    /// <summary>Fetches the Git skills and reads the folders last tried more than <see cref="RefreshInterval"/> ago.</summary>
     public async Task RefreshDueAsync(CancellationToken cancel)
     {
         var due = _time.GetUtcNow() - RefreshInterval;
         List<string> targets;
         lock (_lock)
             targets = _entries
-                .Values.Where(entry => entry.Kind == LoreKinds.Git && !(entry.AttemptedAt > due))
+                .Values.Where(entry => Fetches(entry) && !(entry.AttemptedAt > due))
                 .Select(entry => entry.Target)
                 .ToList();
         foreach (var target in targets)
             await RefreshAsync(target, cancel);
     }
+
+    private static bool Fetches(LoreEntry entry) => entry.Kind is LoreKinds.Git or LoreKinds.Folder;
 
     private static LorePage ToPage((string Path, string Text) file)
     {
@@ -331,7 +370,8 @@ public sealed class LoreStore
             entry.Error,
             PagesOf(entry)
                 .Select(page => page.AdminOnly ? page.Name + " (admins only)" : page.Name)
-                .ToList()
+                .ToList(),
+            entry.Folder
         );
 
     private void SaveEntries() => JsonFiles.Write(_path, _entries);
