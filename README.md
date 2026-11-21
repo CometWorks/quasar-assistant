@@ -32,9 +32,10 @@ admins set up. No provider or model ships with it.
   outcome goes back into the conversation. Admins who could approve also get a web push notice, unless the
   settings turn it off. Proposals expire after 30 days.
 - **Knowledge.** The Quasar book, the admins' handbook from the Quasar repository, ships with the plugin.
-  Admins add Markdown skills per role, such as a FAQ for players. The agents find and read them with
-  `skills_list`, `docs_search` and `skill_read`; none of it is in the prompt until they do. Players get the
-  book only when the admins allow it.
+  Admins add skills per role, such as a FAQ for players: written on the settings page, or from a Git repository,
+  a ZIP or a single `SKILL.md` (see [Skills](#skills)). The agents find and read them with `skills_list`,
+  `docs_search` and `skill_read`; none of it is in the prompt until they do. Players get the book only when the
+  admins allow it.
 - **Lore.** Each server and cluster can have a lore, the world's story, as free text or as a skill folder in a
   Git repository. The agents read it as `lore/…` pages with the same tools, so players' lore questions get
   answers from it. See [Lore](#lore).
@@ -91,6 +92,57 @@ start of their next request, before the model runs. Quasar can't message a playe
 nothing reaches them sooner. `ask_admin` hands the conversation to the admins: it is listed on the Approvals page, pushed to the admins
 who control servers and posted in the admin Discord channel. A player's conversation follows them across
 cluster nodes and starts over after two hours without a message.
+
+## Skills
+
+Each role has its own skills on its tab of the settings page (Admin, Support, Monitor). The monitor reads the
+admin assistant's skills too. A skill is one of these:
+
+- **Written on the page.** A Markdown page with a name, saved as you type.
+- **From a repository.** Its https clone URL, a branch, tag or commit (empty: the default branch), and one or
+  more paths in it, each a folder or a `SKILL.md`. A GitHub, GitLab or Forgejo folder URL pasted as the
+  repository fills in the ref and the path. Quasar fetches only those paths, as it does a lore skill: when the
+  source is saved, on Refresh and every 6 hours. A branch follows its head, a tag or commit stays put. A private
+  repository needs an access token, stored encrypted and never shown again.
+- **A ZIP.** Up to 16 MiB. The skills can be anywhere in its folder tree.
+- **A single `SKILL.md`.** One skill without support files.
+
+In a repository path or a ZIP, every `SKILL.md` starts a skill. Its name is the `name:` in the file's front
+matter, else its folder's name, and its summary in `skills_list` is the front matter's `description:`. The text
+files under its folder stay with it as support files, except those under a deeper `SKILL.md`; binary files,
+dot files and `__MACOSX` folders are left out. The agents read a skill as the page `<skill>` and its support
+files as `<skill>/<path>`, such as `octahedron-world/places.md`. Limits: 500 files, 512 KiB a file and 4 MiB of
+text per source.
+
+Each source has a name, unique per role, and the page shows what it resolved to: the commit of a repository or
+the SHA-256 of an upload, the time, and each skill with its description and number of files. Skill names are
+unique per role, so a source that brings a name another source or a written skill already has is refused. When
+a fetch fails, the error shows next to the source and the assistant keeps the last good copy.
+
+## Settings API
+
+Deployments set the assistant up with these routes, the same operations as the settings page. They need
+`CanManageSecurity`, take a session or a bearer token like Quasar's other APIs, are audited with secrets
+redacted, and are on the agents' deny list. The roles are `admin`, `player` and `monitor`.
+
+| Method | Route | Body |
+|---|---|---|
+| GET | `/api/v1/assistant/settings` | The settings, the backends that have an API key (`apiKeys`) and whether the sandbox token is set. No secrets. |
+| PUT | `/api/v1/assistant/settings/backends` | `{"backends": [...], "apiKeys": {"name": "key"}}` replaces the backends. A key given sets it, `""` removes it, a backend left out of `apiKeys` keeps its key. |
+| PUT | `/api/v1/assistant/settings/roles/{role}` | `{"settings": {...}, "player": {...}, "monitor": {...}}`: the role's settings, the player support settings (`player` role only) and the monitor's (`monitor` role only). A part given replaces that part whole, with defaults for what it leaves out; a part left out stays as it is. Read the settings first to change one value. |
+| GET | `/api/v1/assistant/skills[?role=player]` | Per role the names of the written skills and the sources with what they resolved to. |
+| PUT | `/api/v1/assistant/skills/{role}/{name}` | `{"kind": "git", "repository": "https://github.com/o/r.git", "ref": "main", "paths": ["skills/faq"], "token": "..."}` (or `"url"`: a folder URL instead of the three), `{"kind": "zip", "content": "<base64>", "fileName": "skills.zip"}` or `{"kind": "file", "content": "<base64>"}`. Adds or replaces the source. `token` left out keeps it, `""` removes it. |
+| DELETE | `/api/v1/assistant/skills/{role}/{name}` | |
+| POST | `/api/v1/assistant/skills/{role}/{name}/refresh` | Fetches a repository source again. |
+
+A refused request answers 400 with the reason, an unknown source 404. A repository that can't be fetched still
+saves the source and answers 200 with its `error`, so check it. Backend headers are stored as given and are not
+redacted in the audit log; put keys in `apiKeys`.
+
+```bash
+curl -sS -X PUT -H 'Content-Type: application/json' http://127.0.0.1:8080/api/v1/assistant/skills/player/octahedron \
+  -d "{\"kind\": \"zip\", \"fileName\": \"skills.zip\", \"content\": \"$(base64 -w0 skills.zip)\"}"
+```
 
 ## Lore
 
@@ -201,15 +253,15 @@ use `/ask`. New proposals and hand-overs can be posted to the admin channel with
 | `/assistant/approvals` | `CanUseAssistant` | Players waiting for an admin, pending and decided proposals. Marking a hand-over handled needs `CanControlServers`. |
 | `/assistant/monitor` | `CanUseAssistant` | The monitor's open and resolved incidents, each run's answer, tokens and cost, and the budget. |
 | `/assistant/lore` | `CanEditServers` | The lore of each server and cluster: free text or a Git skill, its fetch state and errors, Refresh. |
-| `/assistant/settings` | `CanManageSecurity` | Backends, their API keys and prices; per role the backend order, modes, limits, code execution, MCP servers and skills; the sandbox's URL and token; player support and restore rules; the monitor's checks, script and budget; notifications, Discord and usage. |
+| `/assistant/settings` | `CanManageSecurity` | In tabs. **Providers**: backends, their API keys, prices and priority; the sandbox's URL and token; notifications, Discord, general limits and usage. **Admin**, **Support** and **Monitor**: per role the backend order, modes, limits, code execution, MCP servers, skills and skill sources; Support also player support and restore rules, Monitor its checks, script and budget. `?tab=admin` and so on opens a tab. |
 
 The chat shows the assistant's answers and the monitor's runs as Markdown: headings, lists, emphasis, code,
 links and tables. HTML in an answer shows as text, and links open only http, https and mailto URLs and Quasar's
 own pages.
 
-The plugin's only endpoints are the lore API above. Its operations are the six MCP operations, which accept
-nothing but the assistant's own agents, the Grid Backups player operations, and the three lore operations,
-which agents can't call. Nothing an agent can call reaches its settings.
+The plugin's only endpoints are the lore and settings APIs above. Its operations are the six MCP operations,
+which accept nothing but the assistant's own agents, the Grid Backups player operations, and the three lore and
+seven settings operations, which agents can't call. Nothing an agent can call reaches its settings.
 
 ## Data folder
 
@@ -225,7 +277,9 @@ Everything lives in `plugin-data/quasar.assistant/` in the Quasar data folder:
 | `handovers.json` | Players handed to the admins. |
 | `player-outbox.json` | Decisions on players' proposals they haven't heard yet, kept as long as proposals. |
 | `player-usage.json` | Per player: questions left and the last refill, action times of the last day, and when the privacy notice was sent. |
-| `skills/admin/*.md`, `skills/player/*.md` | The admins' skills per role. The monitor reads the admin assistant's. |
+| `skills/admin/*.md`, `skills/player/*.md` | The skills written on the settings page per role. The monitor reads the admin assistant's. |
+| `skill-sources.json` | Each role's skill sources: the repository, ref and paths or the uploaded file's name, and the last good skills with their files, commit or SHA-256 and time, and the last error. |
+| `skill-source-tokens.json` | The repository sources' access tokens, encrypted like the API keys. |
 | `lore.json` | Each server's and cluster's lore: the text or the Git URL, and the last good fetch (commit, time, pages) with the last error. |
 | `lore-tokens.json` | Git access tokens, encrypted like the API keys. |
 | `monitor.json` | The monitor's incidents and their runs; resolved ones go after the proposal expiry. |

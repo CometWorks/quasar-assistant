@@ -1,0 +1,279 @@
+@using System.Text.Json
+@using Microsoft.Extensions.DependencyInjection
+@using Quasar.Plugin.Abstractions.Operations
+@using QuasarAssistant.Lore
+@using QuasarAssistant.Skills
+@inject SkillSourceStore Sources
+@inject IServiceProvider Services
+
+@* A role's skill sources: Git repository folders, uploaded ZIPs and single SKILL.md files. Changes go through core's
+   dispatcher like the API, so they are checked and audited. *@
+<h3>Skill sources</h3>
+<p class="assistant-hint">Skills from a GitHub (or GitLab, Forgejo) repository, a ZIP or a single <code>SKILL.md</code>. Every <code>SKILL.md</code> is a skill, named by the <code>name:</code> in its front matter or else by its folder; the text files next to it stay with it. A repository is fetched when you add it, when you refresh it and every @LoreStore.RefreshInterval.TotalHours hours. If a fetch fails, the assistant keeps the last good copy.</p>
+@if (_message is not null)
+{
+    <p class="@(_failed ? "assistant-error" : "assistant-notice")" role="@(_failed ? "alert" : "status")">@_message</p>
+}
+@{ var sources = Sources.List(Role); }
+@if (sources.Count > 0)
+{
+    <div class="assistant-table-wrap">
+        <table>
+            <thead><tr><th scope="col">Source</th><th scope="col">From</th><th scope="col">Resolved to</th><th scope="col"><span class="assistant-visually-hidden">Actions</span></th></tr></thead>
+            <tbody>
+                @foreach (var source in sources)
+                {
+                    <tr>
+                        <th scope="row"><code>@source.Name</code></th>
+                        <td>@From(source)</td>
+                        <td>
+                            @if (source.Error is { } error)
+                            {
+                                <div class="assistant-error" role="alert">Fetch failed @When(source.AttemptedAt): @error</div>
+                            }
+                            @if (source.Revision is { } revision)
+                            {
+                                <div class="assistant-hint">@(source.Kind == SkillSourceKinds.Git ? "commit" : "SHA-256") <code title="@revision">@revision[..Math.Min(12, revision.Length)]</code>, @(source.Kind == SkillSourceKinds.Git ? "fetched" : "uploaded") @When(source.FetchedAt)</div>
+                            }
+                            <ul class="assistant-skill-list">
+                                @foreach (var skill in source.Skills)
+                                {
+                                    <li><code>@skill.Name</code>@(skill.Files.Count switch { 1 => "", 2 => " + 1 file", var n => $" + {n - 1} files" })@(skill.Description.Length > 0 ? ": " + skill.Description : "")</li>
+                                }
+                            </ul>
+                        </td>
+                        <td>
+                            <div class="assistant-row">
+                                @if (source.Kind == SkillSourceKinds.Git)
+                                {
+                                    <button type="button" class="assistant-button" disabled="@_busy" @onclick="() => RefreshAsync(source)">Refresh</button>
+                                    <button type="button" class="assistant-button" disabled="@_busy" @onclick="() => Edit(source)">Edit</button>
+                                }
+                                <button type="button" class="assistant-icon-button" disabled="@_busy" title="Remove @source.Name" aria-label="Remove @source.Name" @onclick="() => RemoveAsync(source)"><AssistantIcon Icon="@AssistantIcons.Delete" /></button>
+                            </div>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+@if (_kind is null)
+{
+    <div class="assistant-row">
+        <button type="button" class="assistant-button" @onclick="() => Add(SkillSourceKinds.Git)"><AssistantIcon Icon="@AssistantIcons.Add" />From a repository</button>
+        <button type="button" class="assistant-button" @onclick="() => Add(SkillSourceKinds.Zip)"><AssistantIcon Icon="@AssistantIcons.Add" />Upload a ZIP</button>
+        <button type="button" class="assistant-button" @onclick="() => Add(SkillSourceKinds.File)"><AssistantIcon Icon="@AssistantIcons.Add" />Upload a SKILL.md</button>
+    </div>
+}
+else
+{
+    <form class="assistant-form" @onsubmit="SaveAsync">
+        <h3>@Title</h3>
+        <label>Source name (letters, digits, - and _) <input required maxlength="64" readonly="@_editing" @bind="_name" /></label>
+        @if (_kind == SkillSourceKinds.Git)
+        {
+            <label class="assistant-wide-field">Repository: its https clone URL, or a GitHub, GitLab or Forgejo folder URL, which fills in the ref and path
+                <input class="assistant-wide" placeholder="https://github.com/owner/repo" @bind="_repository" @bind:after="SplitUrl" />
+            </label>
+            <label>Branch, tag or commit (empty: the default branch) <input @bind="_ref" placeholder="main" /></label>
+            <label class="assistant-wide-field">Paths in the repository, one per line: a folder (all the skills in it) or a <code>SKILL.md</code>. Empty: the whole repository.
+                <textarea class="assistant-wide" rows="3" @bind="_paths" placeholder="skills/octahedron-world&#10;skills/support/SKILL.md"></textarea>
+            </label>
+            <label>Access token for a private repository (@(_tokenSet ? "set; leave empty to keep it" : "none")) <input type="password" autocomplete="off" @bind="_token" /></label>
+            @if (_tokenSet)
+            {
+                <label class="assistant-check"><input type="checkbox" @bind="_removeToken" /> Remove the token</label>
+            }
+        }
+        else
+        {
+            <label>@(_kind == SkillSourceKinds.Zip ? "ZIP file, up to " + SkillTree.MaxZipBytes / 1024 / 1024 + " MiB" : "SKILL.md file")
+                <InputFile accept="@(_kind == SkillSourceKinds.Zip ? ".zip,application/zip" : ".md,text/markdown")" OnChange="PickAsync" />
+            </label>
+            @if (_fileName is not null)
+            {
+                <p class="assistant-hint">@_fileName, @(_content?.Length ?? 0) bytes</p>
+            }
+        }
+        <div class="assistant-row">
+            <button type="submit" class="assistant-button assistant-button-primary" disabled="@(_busy || (_kind != SkillSourceKinds.Git && _content is null))">@(_busy ? "Reading..." : "Save")</button>
+            <button type="button" class="assistant-button" @onclick="() => _kind = null">Cancel</button>
+        </div>
+    </form>
+}
+
+@code {
+    [Parameter, EditorRequired] public string Role { get; set; } = "";
+    [CascadingParameter] private Task<AuthenticationState> Authentication { get; set; } = null!;
+
+    private string? _kind;
+    private bool _editing;
+    private string _name = "";
+    private string _repository = "";
+    private string _ref = "";
+    private string _paths = "";
+    private string _token = "";
+    private bool _tokenSet;
+    private bool _removeToken;
+    private string? _fileName;
+    private byte[]? _content;
+    private bool _busy;
+    private string? _message;
+    private bool _failed;
+
+    private string Title => _kind switch
+    {
+        SkillSourceKinds.Git => _editing ? "Edit " + _name : "Skills from a repository",
+        SkillSourceKinds.Zip => "Skills from a ZIP",
+        _ => "One SKILL.md",
+    };
+
+    private static string From(SkillSourceView source) => source.Kind switch
+    {
+        SkillSourceKinds.Git => $"{source.Repository} at {(source.Ref.Length > 0 ? source.Ref : "the default branch")}"
+            + (source.Paths.Count > 0 ? ": " + string.Join(", ", source.Paths) : "")
+            + (source.TokenSet ? " (token set)" : ""),
+        SkillSourceKinds.Zip => "ZIP " + source.FileName,
+        _ => "File " + source.FileName,
+    };
+
+    private static string When(DateTimeOffset? time) => time?.UtcDateTime.ToString("yyyy-MM-dd HH:mm 'UTC'") ?? "";
+
+    private void Add(string kind)
+    {
+        _kind = kind;
+        _editing = false;
+        _name = _repository = _ref = _paths = _token = "";
+        _tokenSet = _removeToken = false;
+        _fileName = null;
+        _content = null;
+        _message = null;
+    }
+
+    private void Edit(SkillSourceView source)
+    {
+        Add(source.Kind);
+        _editing = true;
+        _name = source.Name;
+        _repository = source.Repository;
+        _ref = source.Ref;
+        _paths = string.Join('\n', source.Paths);
+        _tokenSet = source.TokenSet;
+    }
+
+    // A pasted folder URL fills in the repository, ref and path.
+    private void SplitUrl()
+    {
+        if (_repository.Contains('#') || _repository.Contains("/tree/") || _repository.Contains("/src/"))
+            if (GitSkillUrl.TryParse(_repository, false, out var url, out _) && url!.Repository != _repository.Trim())
+            {
+                _repository = url.Repository;
+                _ref = url.Ref;
+                if (url.Path.Length > 0)
+                    _paths = url.Path;
+            }
+    }
+
+    private async Task PickAsync(InputFileChangeEventArgs e)
+    {
+        _content = null;
+        _fileName = e.File.Name;
+        try
+        {
+            await using var stream = e.File.OpenReadStream(SkillTree.MaxZipBytes);
+            using var buffer = new MemoryStream();
+            await stream.CopyToAsync(buffer);
+            _content = buffer.ToArray();
+            if (_name.Length == 0)
+                _name = SkillLibrary.IsValidName(Path.GetFileNameWithoutExtension(e.File.Name)) && _kind == SkillSourceKinds.Zip
+                    ? Path.GetFileNameWithoutExtension(e.File.Name)
+                    : "";
+        }
+        catch (IOException error)
+        {
+            Fail("The file could not be read: " + error.Message);
+        }
+    }
+
+    private async Task SaveAsync()
+    {
+        var token = _removeToken ? "" : _token.Length > 0 ? _token : null;
+        var request = new SkillSourceSetRequest(
+            Role,
+            _name.Trim(),
+            _kind!,
+            _repository.Trim(),
+            _ref.Trim(),
+            _paths.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
+            Token: token,
+            Content: _content is null ? null : Convert.ToBase64String(_content),
+            FileName: _fileName);
+        if (await RunAsync(SettingsApi.SetSource, request) && Sources.Get(Role, request.Name) is { } view)
+        {
+            _kind = null;
+            if (view.Error is { } error)
+                Fail("Saved, but the repository could not be fetched: " + error);
+            else
+                Say($"Saved {view.Name}: {string.Join(", ", view.Skills.Select(skill => skill.Name))}.");
+        }
+    }
+
+    private async Task RefreshAsync(SkillSourceView source)
+    {
+        if (await RunAsync(SettingsApi.RefreshSource, new SkillSourceRequest(Role, source.Name)) && Sources.Get(Role, source.Name) is { } view)
+        {
+            if (view.Error is { } error)
+                Fail("The repository could not be fetched: " + error);
+            else
+                Say($"Fetched {view.Name} at {view.Revision?[..Math.Min(12, view.Revision.Length)]}.");
+        }
+    }
+
+    private async Task RemoveAsync(SkillSourceView source)
+    {
+        if (await RunAsync(SettingsApi.RemoveSource, new SkillSourceRequest(Role, source.Name)))
+            Say($"Removed {source.Name}.");
+    }
+
+    // Through core's dispatcher, as the API does: the same checks and an audit entry.
+    private async Task<bool> RunAsync(string operation, object request)
+    {
+        _busy = true;
+        _message = null;
+        _failed = false;
+        try
+        {
+            var user = (await Authentication).User;
+            await using var scope = Services.CreateAsyncScope();
+            var result = await scope.ServiceProvider.GetRequiredService<IQuasarOperationDispatcher>().DispatchAsync(
+                new QuasarOperationContext(user, scope.ServiceProvider),
+                AssistantServiceCollectionExtensions.PluginId,
+                operation,
+                JsonSerializer.SerializeToElement(request, JsonSerializerOptions.Web),
+                CancellationToken.None);
+            if (result.Error is not null)
+            {
+                Fail(result.Error);
+                return false;
+            }
+            return true;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private void Say(string message)
+    {
+        _message = message;
+        _failed = false;
+    }
+
+    private void Fail(string message)
+    {
+        _message = message;
+        _failed = true;
+    }
+}

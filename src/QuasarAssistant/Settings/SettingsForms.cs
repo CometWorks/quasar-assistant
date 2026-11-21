@@ -186,3 +186,54 @@ public sealed class PlayerForm
             },
         };
 }
+
+/// <summary>The monitor section: checks, script and token budget.</summary>
+public sealed class MonitorForm
+{
+    public bool Enabled { get; set; }
+    public int CheckSeconds { get; set; }
+    public int GraceMinutes { get; set; }
+    public double MinSimSpeed { get; set; }
+    public int SlowMinutes { get; set; }
+    public int MaxSaveAgeMinutes { get; set; }
+    public int RecheckMinutes { get; set; }
+    public string ScriptCommand { get; set; } = "";
+    public string ScriptArguments { get; set; } = "";
+    public int ScriptTimeoutSeconds { get; set; }
+    public long BudgetTokens { get; set; }
+    public BudgetPeriod BudgetPeriod { get; set; }
+
+    public static MonitorForm From(MonitorSettings s) =>
+        new()
+        {
+            Enabled = s.Enabled,
+            CheckSeconds = s.CheckSeconds,
+            GraceMinutes = s.GraceMinutes,
+            MinSimSpeed = s.MinSimSpeed,
+            SlowMinutes = s.SlowMinutes,
+            MaxSaveAgeMinutes = s.MaxSaveAgeMinutes,
+            RecheckMinutes = s.RecheckMinutes,
+            ScriptCommand = s.ScriptCommand,
+            ScriptArguments = s.ScriptArguments,
+            ScriptTimeoutSeconds = s.ScriptTimeoutSeconds,
+            BudgetTokens = s.BudgetTokens,
+            BudgetPeriod = s.BudgetPeriod,
+        };
+
+    public MonitorSettings ToSettings() =>
+        new()
+        {
+            Enabled = Enabled,
+            CheckSeconds = Math.Max(10, CheckSeconds),
+            GraceMinutes = Math.Max(0, GraceMinutes),
+            MinSimSpeed = Math.Clamp(MinSimSpeed, 0, 1),
+            SlowMinutes = Math.Max(0, SlowMinutes),
+            MaxSaveAgeMinutes = Math.Max(0, MaxSaveAgeMinutes),
+            RecheckMinutes = Math.Max(1, RecheckMinutes),
+            ScriptCommand = ScriptCommand.Trim(),
+            ScriptArguments = ScriptArguments.Trim(),
+            ScriptTimeoutSeconds = Math.Max(1, ScriptTimeoutSeconds),
+            BudgetTokens = Math.Max(0, BudgetTokens),
+            BudgetPeriod = BudgetPeriod,
+        };
+}

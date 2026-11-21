@@ -7,6 +7,7 @@ using Quasar.Plugin.Abstractions.Navigation;
 using Quasar.Plugin.Abstractions.Security;
 using QuasarAssistant.Components;
 using QuasarAssistant.Lore;
+using QuasarAssistant.Settings;
 
 namespace QuasarAssistant.Quasar;
 
@@ -21,10 +22,13 @@ public sealed class AssistantQuasarPlugin : IQuasarPlugin
             Path.Combine(context.InstallDirectory, "plugin-data", context.PluginId)
         );
 
-    // Only the lore API, whose operations are on the agents' deny list: nothing an agent could call reaches the
-    // settings or the lore. The other operations (MCP calls, the player's Grid Backups ones) have no routes.
-    public void ConfigureEndpoints(IEndpointRouteBuilder endpoints, QuasarPluginContext context) =>
+    // Only the lore and settings APIs, whose operations are on the agents' deny list: nothing an agent could call
+    // reaches the settings or the lore. The other operations (MCP calls, the player's Grid Backups ones) have no routes.
+    public void ConfigureEndpoints(IEndpointRouteBuilder endpoints, QuasarPluginContext context)
+    {
         endpoints.MapLoreApi();
+        endpoints.MapSettingsApi();
+    }
 
     public IEnumerable<Assembly> GetRazorAssemblies()
     {
