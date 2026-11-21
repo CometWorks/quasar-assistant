@@ -42,29 +42,32 @@
 
 <h3>What the @Label may do</h3>
 <p class="assistant-hint">@ModesHint</p>
-<div class="assistant-table-wrap">
-    <table>
-        <thead><tr><th scope="col">Area</th><th scope="col">Mode</th></tr></thead>
-        <tbody>
-            @foreach (var area in Operations.Select(ToolCatalog.Area).Distinct().Order())
-            {
-                <tr>
-                    <th scope="row">@area</th>
-                    <td>
-                        <select value="@(Form.AreaModes.TryGetValue(area, out var mode) ? mode.ToString() : "")" aria-label="Mode for @area"
-                                @onchange="e => SetModeAsync(Form.AreaModes, area, (string?)e.Value)">
-                            <option value="">Default (reads: read, changes: propose)</option>
-                            @foreach (var option in Enum.GetValues<ToolMode>())
-                            {
-                                <option value="@option">@option</option>
-                            }
-                        </select>
-                    </td>
-                </tr>
-            }
-        </tbody>
-    </table>
-</div>
+<details>
+    <summary>Per area</summary>
+    <div class="assistant-table-wrap">
+        <table>
+            <thead><tr><th scope="col">Area</th><th scope="col">Mode</th></tr></thead>
+            <tbody>
+                @foreach (var area in Operations.Select(ToolCatalog.Area).Distinct().Order())
+                {
+                    <tr>
+                        <th scope="row">@area</th>
+                        <td>
+                            <select value="@(Form.AreaModes.TryGetValue(area, out var mode) ? mode.ToString() : "")" aria-label="Mode for @area"
+                                    @onchange="e => SetModeAsync(Form.AreaModes, area, (string?)e.Value)">
+                                <option value="">Default (reads: read, changes: propose)</option>
+                                @foreach (var option in Enum.GetValues<ToolMode>())
+                                {
+                                    <option value="@option">@option</option>
+                                }
+                            </select>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+</details>
 <details>
     <summary>Per operation</summary>
     <div class="assistant-table-wrap">

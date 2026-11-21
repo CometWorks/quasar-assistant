@@ -1,7 +1,7 @@
 {
   "id": "quasar.assistant",
   "displayName": "Assistant",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "entryAssembly": "QuasarAssistant.Quasar.dll",
   "entryType": "QuasarAssistant.Quasar.AssistantQuasarPlugin",
   "projectPath": "src/QuasarAssistant.Quasar/QuasarAssistant.Quasar.csproj",

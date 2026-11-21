@@ -55,6 +55,7 @@ public static class AssistantServiceCollectionExtensions
         services.AddSingleton<MetricsLog>();
         services.AddSingleton<GitFetcher>();
         services.AddSingleton<LoreStore>();
+        services.AddSingleton<SkillSourceStore>();
         services.AddSingleton<SkillLibrary>();
         services.AddSingleton<McpRegistry>();
         services.AddSingleton<ToolCatalog>();
@@ -78,6 +79,7 @@ public static class AssistantServiceCollectionExtensions
         AddMcpOperations(services);
         services.AddGridBackupsOperations();
         services.AddLoreOperations();
+        services.AddSettingsOperations();
         return services;
     }
 
@@ -157,7 +159,7 @@ public static class AssistantServiceCollectionExtensions
 
 /// <summary>On start: fetches the MCP servers' tools. Hourly: deletes old conversations, expires old proposals
 /// and hand-overs, drops undelivered player notes and resolved incidents as old, and fetches the Git lore skills
-/// that are due.</summary>
+/// and Git skill sources that are due.</summary>
 internal sealed class AssistantMaintenance(
     SettingsStore settings,
     ConversationStore conversations,
@@ -167,6 +169,7 @@ internal sealed class AssistantMaintenance(
     IncidentStore incidents,
     McpRegistry mcp,
     LoreStore lore,
+    SkillSourceStore sources,
     TimeProvider time,
     ILogger<AssistantMaintenance> logger
 ) : BackgroundService
@@ -186,6 +189,7 @@ internal sealed class AssistantMaintenance(
                 outbox.Forget(expired);
                 incidents.Forget(expired);
                 await lore.RefreshDueAsync(token);
+                await sources.RefreshDueAsync(token);
             }
             catch (Exception error) when (error is not OperationCanceledException)
             {

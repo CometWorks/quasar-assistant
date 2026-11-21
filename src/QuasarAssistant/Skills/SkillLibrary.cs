@@ -8,23 +8,34 @@ namespace QuasarAssistant.Skills;
 
 public sealed record SkillPage(string Name, string Text)
 {
-    /// <summary>The first non-empty line without its Markdown heading marks.</summary>
+    /// <summary>The front matter's description, else the first non-empty line after it without its Markdown
+    /// heading marks.</summary>
     public string Summary =>
-        Text.Split('\n')
-            .Select(line => line.Trim().TrimStart('#').Trim())
-            .FirstOrDefault(line => line.Length > 0)
-        ?? "";
+        SkillTree.FrontMatter(Text).GetValueOrDefault("description") is { Length: > 0 } description
+            ? description
+            : Body.Split('\n')
+                .Select(line => line.Trim().TrimStart('#').Trim())
+                .FirstOrDefault(line => line.Length > 0)
+                ?? "";
+
+    private string Body =>
+        Text.StartsWith("---\n", StringComparison.Ordinal)
+        && Text.IndexOf("\n---", 3, StringComparison.Ordinal) is var end and > 0
+            ? Text[(end + 4)..]
+            : Text;
 }
 
 /// <summary>
 /// The knowledge the agents read through tools: the Quasar book shipped in the plugin, the admins' Markdown
-/// skills per role in <c>skills/&lt;role&gt;/*.md</c> of the data folder, and the lore of the server or cluster
-/// asked about (<paramref name="lore"/>). Text only; nothing here runs.
+/// skills per role in <c>skills/&lt;role&gt;/*.md</c> of the data folder, the skills of the role's sources
+/// (<paramref name="sources"/>), and the lore of the server or cluster asked about (<paramref name="lore"/>). Text
+/// only; nothing here runs. The monitor reads the admin assistant's skills too.
 /// </summary>
 public sealed partial class SkillLibrary(
     AssistantPaths paths,
     SettingsStore settings,
-    LoreStore lore
+    LoreStore lore,
+    SkillSourceStore sources
 )
 {
     public const string BookPrefix = "quasar-book/";
@@ -39,10 +50,23 @@ public sealed partial class SkillLibrary(
 
     public static bool IsValidName(string name) => ValidName().IsMatch(name);
 
-    /// <summary>The role's own skills, editable on the settings page.</summary>
+    /// <summary>The names of the skills written on the settings page for the role.</summary>
+    public static IReadOnlySet<string> InlineNames(AssistantPaths paths, string role)
+    {
+        var folder = Folder(paths, role);
+        return Directory.Exists(folder)
+            ? Directory
+                .EnumerateFiles(folder, "*.md")
+                .Select(Path.GetFileNameWithoutExtension)
+                .OfType<string>()
+                .ToHashSet()
+            : new HashSet<string>();
+    }
+
+    /// <summary>The role's skills written on the settings page.</summary>
     public IReadOnlyList<SkillPage> Skills(string role)
     {
-        var folder = Folder(role);
+        var folder = Folder(paths, role);
         return Directory.Exists(folder)
             ? Directory
                 .EnumerateFiles(folder, "*.md")
@@ -59,7 +83,11 @@ public sealed partial class SkillLibrary(
     {
         if (!IsValidName(name))
             throw new ArgumentException("A skill name is 1 to 64 letters, digits, - or _.");
-        Directory.CreateDirectory(Folder(role));
+        if (sources.HasSkill(role, name))
+            throw new ArgumentException(
+                $"A skill source of this role already has a skill named {name}."
+            );
+        Directory.CreateDirectory(Folder(paths, role));
         File.WriteAllText(FilePath(role, name), text.ReplaceLineEndings("\n"));
     }
 
@@ -72,16 +100,52 @@ public sealed partial class SkillLibrary(
     /// <summary>What the role may read: its skills, the lore of <paramref name="loreTarget"/> (a server's or
     /// cluster's unique name), and the book for admins or when the admins open it to players.</summary>
     public IReadOnlyList<SkillPage> PagesFor(string role, string? loreTarget = null) =>
-        [.. Skills(role), .. lore.Pages(loreTarget, role), .. WithBook(role) ? Book : []];
+        [
+            .. Skills(role),
+            .. SourcePages(role),
+            .. lore.Pages(loreTarget, role),
+            .. WithBook(role) ? Book : [],
+        ];
+
+    /// <summary>The pages of the role's source skills: <c>&lt;skill&gt;</c> for its SKILL.md and
+    /// <c>&lt;skill&gt;/&lt;file&gt;</c> for each support file.</summary>
+    public IReadOnlyList<SkillPage> SourcePages(string role) =>
+        SourceSkills(role)
+            .SelectMany(skill =>
+                skill.Files.Select(file => new SkillPage(
+                    file.Path == SkillTree.SkillFileName
+                        ? skill.Name
+                        : skill.Name + "/" + file.Path,
+                    file.Text
+                ))
+            )
+            .ToList();
+
+    private IEnumerable<StoredSkill> SourceSkills(string role) =>
+        role == AssistantRoles.Monitor
+            ? [.. sources.Skills(AssistantRoles.Admin), .. sources.Skills(AssistantRoles.Monitor)]
+            : sources.Skills(role);
 
     /// <summary><c>skills_list</c>: name and first line per skill, and the book's contents for those who read it.</summary>
     public string List(string role, string? loreTarget = null)
     {
         var text = new StringBuilder();
         var skills = Skills(role);
-        text.Append(skills.Count == 0 ? "No skills written by the admins.\n" : "Skills:\n");
+        var sourced = SourcePages(role);
+        text.Append(
+            skills.Count + sourced.Count == 0 ? "No skills given by the admins.\n" : "Skills:\n"
+        );
         foreach (var page in skills)
             text.Append($"- {page.Name}: {page.Summary}\n");
+        foreach (var skill in SourceSkills(role))
+        {
+            var main = sourced.First(page => page.Name == skill.Name);
+            text.Append(
+                $"- {skill.Name}: {(skill.Description.Length > 0 ? skill.Description : main.Summary)}\n"
+            );
+            foreach (var file in skill.Files.Where(file => file.Path != SkillTree.SkillFileName))
+                text.Append($"  - {skill.Name}/{file.Path}\n");
+        }
         var lorePages = lore.Pages(loreTarget, role);
         if (lorePages.Count > 0)
         {
@@ -166,14 +230,15 @@ public sealed partial class SkillLibrary(
     private bool WithBook(string role) =>
         role != AssistantRoles.Player || settings.Current.Player.QuasarBook;
 
-    private string Folder(string role) =>
+    private static string Folder(AssistantPaths paths, string role) =>
         Path.Combine(
             paths.DataDirectory,
             "skills",
             role == AssistantRoles.Player ? "player" : "admin"
         );
 
-    private string FilePath(string role, string name) => Path.Combine(Folder(role), name + ".md");
+    private string FilePath(string role, string name) =>
+        Path.Combine(Folder(paths, role), name + ".md");
 
     private static int Count(string text, string word)
     {

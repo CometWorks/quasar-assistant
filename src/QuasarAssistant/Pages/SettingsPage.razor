@@ -13,260 +13,285 @@
 @inject MonitorBudget Budget
 @inject QuasarAssistant.Mcp.McpRegistry Registry
 @inject TimeProvider Time
+@inject QuasarAssistant.Skills.SkillSourceStore SkillSources
 
 <PageTitle>Assistant settings</PageTitle>
 <div class="assistant-surface assistant-settings">
     <h1>Assistant settings</h1>
-    <p class="assistant-hint">Changes are saved as you make them. <strong>Revert my changes</strong> at the bottom of the page puts everything back as it was when you opened the page.</p>
+    <p class="assistant-hint">Changes are saved as you make them. <strong>Revert my changes</strong> at the bottom of the page puts everything on every tab back as it was when you opened the page.</p>
     @if (_message is not null)
     {
         <p class="@(_failed ? "assistant-error" : "assistant-notice")" role="@(_failed ? "alert" : "status")">@_message</p>
     }
 
-    <section>
-        <h2>Models</h2>
-        <p class="assistant-hint">Each backend is one model at one provider. Each role tries its own backends in its order and moves to the next one when a backend fails, as Clangy does.</p>
-        <div class="assistant-table-wrap">
-            <table>
-                <thead><tr><th scope="col">Name</th><th scope="col">Kind</th><th scope="col">Model</th><th scope="col">API key</th><th scope="col">Test</th><th scope="col"><span class="assistant-visually-hidden">Actions</span></th></tr></thead>
-                <tbody>
-                    @foreach (var backend in _settings.Backends.OrderBy(b => b.Priority).ThenBy(b => b.Name))
-                    {
-                        <tr>
-                            <th scope="row">@backend.Name</th>
-                            <td>@(backend.Kind == BackendKind.Anthropic ? "Anthropic" : "OpenAI-compatible")</td>
-                            <td><code>@backend.Model</code></td>
-                            <td>@(Store.HasApiKey(backend.Name) ? "set" : "none")</td>
-                            <td>
-                                <button type="button" class="assistant-button" disabled="@(_testing == backend.Name)" @onclick="() => TestAsync(backend)">Test</button>
-                                @if (_tests.TryGetValue(backend.Name, out var test))
+    <div class="assistant-tabs" role="tablist" aria-label="Settings">
+        @foreach (var (id, label) in Tabs)
+        {
+            <button type="button" role="tab" id="assistant-tab-@id" aria-controls="assistant-panel-@id" aria-selected="@(_tab == id ? "true" : "false")"
+                    tabindex="@(_tab == id ? 0 : -1)" class="assistant-tab @(_tab == id ? "assistant-tab-selected" : "")"
+                    @onclick="() => Select(id)" @onkeydown="e => TabKey(e, id)">@label</button>
+        }
+    </div>
+
+    <div class="assistant-tab-panel" role="tabpanel" id="assistant-panel-@_tab" aria-labelledby="assistant-tab-@_tab">
+        @switch (_tab)
+        {
+            case "providers":
+                <section>
+                    <h2>Models</h2>
+                    <p class="assistant-hint">Each backend is one model at one provider. Each role tries its own backends in its order and moves to the next one when a backend fails, as Clangy does. The priority orders this list and is the order a role's backends are offered in on its tab.</p>
+                    <div class="assistant-table-wrap">
+                        <table>
+                            <thead><tr><th scope="col">Name</th><th scope="col">Kind</th><th scope="col">Model</th><th scope="col">API key</th><th scope="col">Test</th><th scope="col"><span class="assistant-visually-hidden">Actions</span></th></tr></thead>
+                            <tbody>
+                                @foreach (var backend in _settings.Backends.OrderBy(b => b.Priority).ThenBy(b => b.Name))
                                 {
-                                    <span class="@(test.Ok ? "assistant-ok" : "assistant-error")">@test.Text</span>
+                                    <tr>
+                                        <th scope="row">@backend.Name</th>
+                                        <td>@(backend.Kind == BackendKind.Anthropic ? "Anthropic" : "OpenAI-compatible")</td>
+                                        <td><code>@backend.Model</code></td>
+                                        <td>@(Store.HasApiKey(backend.Name) ? "set" : "none")</td>
+                                        <td>
+                                            <button type="button" class="assistant-button" disabled="@(_testing == backend.Name)" @onclick="() => TestAsync(backend)">Test</button>
+                                            @if (_tests.TryGetValue(backend.Name, out var test))
+                                            {
+                                                <span class="@(test.Ok ? "assistant-ok" : "assistant-error")">@test.Text</span>
+                                            }
+                                        </td>
+                                        <td>
+                                            <button type="button" class="assistant-button" @onclick="() => Edit(backend)">Edit</button>
+                                            <button type="button" class="assistant-icon-button" title="Delete @backend.Name" aria-label="Delete @backend.Name" @onclick="() => DeleteBackend(backend)"><AssistantIcon Icon="@AssistantIcons.Delete" /></button>
+                                        </td>
+                                    </tr>
                                 }
-                            </td>
-                            <td>
-                                <button type="button" class="assistant-button" @onclick="() => Edit(backend)">Edit</button>
-                                <button type="button" class="assistant-icon-button" title="Delete @backend.Name" aria-label="Delete @backend.Name" @onclick="() => DeleteBackend(backend)"><AssistantIcon Icon="@AssistantIcons.Delete" /></button>
-                            </td>
-                        </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    @if (_form is null)
+                    {
+                        <button type="button" class="assistant-button" @onclick="() => Edit(null)"><AssistantIcon Icon="@AssistantIcons.Add" />Add a backend</button>
                     }
-                </tbody>
-            </table>
-        </div>
-        @if (_form is null)
-        {
-            <button type="button" class="assistant-button" @onclick="() => Edit(null)"><AssistantIcon Icon="@AssistantIcons.Add" />Add a backend</button>
-        }
-        else
-        {
-            <form class="assistant-form" @onsubmit="CloseBackend">
-                <h3>@(_form.Original is null ? "New backend" : "Edit " + _form.Original)</h3>
-                <label>Name <input required maxlength="64" @bind="_form.Name" /></label>
-                <label>Kind
-                    <select @bind="_form.Kind">
-                        <option value="@BackendKind.OpenAi">OpenAI-compatible (OpenRouter, OpenAI, llama.cpp, vLLM)</option>
-                        <option value="@BackendKind.Anthropic">Anthropic Messages API</option>
-                    </select>
-                </label>
-                <label>Base URL, with /v1 <input required type="url" @bind="_form.BaseUrl" placeholder="https://openrouter.ai/api/v1" /></label>
-                <label>Model <input required @bind="_form.Model" /></label>
-                <label>API key
-                    <input type="password" autocomplete="new-password" @bind="_form.ApiKey"
-                           placeholder="@(_form.Original is not null && Store.HasApiKey(_form.Original) ? "Set. Type a new key to replace it." : "Not set")" />
-                </label>
-                @if (_form.Original is not null && Store.HasApiKey(_form.Original))
-                {
-                    <label class="assistant-check"><input type="checkbox" @bind="_form.RemoveKey" /> Remove the stored key</label>
-                }
-                <label>Priority (lower first in this list) <input type="number" min="0" @bind="_form.Priority" /></label>
-                <label>Parallel requests <input type="number" min="1" max="64" @bind="_form.Parallel" /></label>
-                <label>Context window (tokens) <input type="number" min="1024" @bind="_form.ContextWindow" /></label>
-                <label>Max tokens per answer <input type="number" min="16" @bind="_form.MaxTokens" /></label>
-                <label>Thinking
-                    <select @bind="_form.Thinking">
-                        @foreach (var level in Enum.GetValues<ThinkingLevel>())
+                    else
+                    {
+                        <form class="assistant-form" @onsubmit="CloseBackend">
+                            <h3>@(_form.Original is null ? "New backend" : "Edit " + _form.Original)</h3>
+                            <label>Name <input required maxlength="64" @bind="_form.Name" /></label>
+                            <label>Kind
+                                <select @bind="_form.Kind">
+                                    <option value="@BackendKind.OpenAi">OpenAI-compatible (OpenRouter, OpenAI, llama.cpp, vLLM)</option>
+                                    <option value="@BackendKind.Anthropic">Anthropic Messages API</option>
+                                </select>
+                            </label>
+                            <label>Base URL, with /v1 <input required type="url" @bind="_form.BaseUrl" placeholder="https://openrouter.ai/api/v1" /></label>
+                            <label>Model <input required @bind="_form.Model" /></label>
+                            <label>API key
+                                <input type="password" autocomplete="new-password" @bind="_form.ApiKey"
+                                       placeholder="@(_form.Original is not null && Store.HasApiKey(_form.Original) ? "Set. Type a new key to replace it." : "Not set")" />
+                            </label>
+                            @if (_form.Original is not null && Store.HasApiKey(_form.Original))
+                            {
+                                <label class="assistant-check"><input type="checkbox" @bind="_form.RemoveKey" /> Remove the stored key</label>
+                            }
+                            <label>Priority (lower first in this list) <input type="number" min="0" @bind="_form.Priority" /></label>
+                            <label>Parallel requests <input type="number" min="1" max="64" @bind="_form.Parallel" /></label>
+                            <label>Context window (tokens) <input type="number" min="1024" @bind="_form.ContextWindow" /></label>
+                            <label>Max tokens per answer <input type="number" min="16" @bind="_form.MaxTokens" /></label>
+                            <label>Thinking
+                                <select @bind="_form.Thinking">
+                                    @foreach (var level in Enum.GetValues<ThinkingLevel>())
+                                    {
+                                        <option value="@level">@level</option>
+                                    }
+                                </select>
+                            </label>
+                            <label>First-byte timeout (s, empty: none) <input type="number" min="1" step="any" @bind="_form.FirstByteTimeout" /></label>
+                            <label>Stall timeout (s, empty: none) <input type="number" min="1" step="any" @bind="_form.StallTimeout" /></label>
+                            <label>Cooldown (s) <input type="number" min="0" step="any" @bind="_form.Cooldown" /></label>
+                            <label>Maximum cooldown (s) <input type="number" min="0" step="any" @bind="_form.MaxCooldown" /></label>
+                            <label>Input price, USD per million tokens (empty: unknown) <input type="number" min="0" step="any" @bind="_form.InputPrice" /></label>
+                            <label>Cached input price (empty: the input price) <input type="number" min="0" step="any" @bind="_form.CachedInputPrice" /></label>
+                            <label>Output price <input type="number" min="0" step="any" @bind="_form.OutputPrice" /></label>
+                            <label>Headers, one <code>Name: value</code> per line (keys go in the API key field) <textarea rows="3" @bind="_form.Headers"></textarea></label>
+                            <label>Extra body, a JSON object merged into each request <textarea rows="3" @bind="_form.ExtraBody" placeholder='{"provider": {"sort": "price"}}'></textarea></label>
+                            <div class="assistant-row">
+                                <button type="submit" class="assistant-button assistant-button-primary">Done</button>
+                            </div>
+                        </form>
+                    }
+                </section>
+
+                <section>
+                    <h2>Code execution</h2>
+                    <p class="assistant-hint">The Quasar Sandbox runs Python and C# with no network, in a workspace per conversation, with limits on time, memory and disk. It is a separate server that runs on Linux; see <code>sandbox/README.md</code> in the plugin's repository. Each role turns it on or off under its own settings: on for the admin assistant and the monitor, off for the player agent by default. Its tools only change the sandbox's own files, so they run in read mode.</p>
+                    <div class="assistant-form">
+                        <label>Sandbox MCP URL (empty: off) <input type="url" @bind="_sandboxUrl" placeholder="http://127.0.0.1:8765/mcp" /></label>
+                        <label>Token
+                            <input type="password" autocomplete="new-password" @bind="_sandboxToken"
+                                   placeholder="@(Store.HasSandboxToken ? "Set. Type a new token to replace it." : "Not set")" />
+                        </label>
+                    </div>
+                    @foreach (var role in AssistantRoles.All)
+                    {
+                        @if (Registry.Status(role, SandboxSettings.ServerName) is { } status)
                         {
-                            <option value="@level">@level</option>
+                            <p class="@(status.Error is null ? "assistant-hint" : "assistant-error")">@role: @(status.Error is null ? $"{status.Tools} tools, fetched {status.Time.UtcDateTime:yyyy-MM-dd HH:mm} UTC." : "fetching the tools failed: " + status.Error)</p>
                         }
-                    </select>
-                </label>
-                <label>First-byte timeout (s, empty: none) <input type="number" min="1" step="any" @bind="_form.FirstByteTimeout" /></label>
-                <label>Stall timeout (s, empty: none) <input type="number" min="1" step="any" @bind="_form.StallTimeout" /></label>
-                <label>Cooldown (s) <input type="number" min="0" step="any" @bind="_form.Cooldown" /></label>
-                <label>Maximum cooldown (s) <input type="number" min="0" step="any" @bind="_form.MaxCooldown" /></label>
-                <label>Input price, USD per million tokens (empty: unknown) <input type="number" min="0" step="any" @bind="_form.InputPrice" /></label>
-                <label>Cached input price (empty: the input price) <input type="number" min="0" step="any" @bind="_form.CachedInputPrice" /></label>
-                <label>Output price <input type="number" min="0" step="any" @bind="_form.OutputPrice" /></label>
-                <label>Headers, one <code>Name: value</code> per line (keys go in the API key field) <textarea rows="3" @bind="_form.Headers"></textarea></label>
-                <label>Extra body, a JSON object merged into each request <textarea rows="3" @bind="_form.ExtraBody" placeholder='{"provider": {"sort": "price"}}'></textarea></label>
-                <div class="assistant-row">
-                    <button type="submit" class="assistant-button assistant-button-primary">Done</button>
-                </div>
-            </form>
+                    }
+                </section>
+
+                <section>
+                    <h2>Notifications and Discord</h2>
+                    <div class="assistant-form">
+                        <label class="assistant-check"><input type="checkbox" @bind="_general.Cards" /> Proposal cards in the conversation (the Approvals page is always there)</label>
+                        <label class="assistant-check"><input type="checkbox" @bind="_general.WebPush" /> Web push to the admins who could approve a proposal or take a hand-over</label>
+                        <label class="assistant-check"><input type="checkbox" @bind="_general.Discord" /> Post proposals and hand-overs in the admin Discord channel</label>
+                        <label>Admin Discord channel ID <input inputmode="numeric" @bind="_general.AdminChannelId" placeholder="123456789012345678" /></label>
+                        <label>Quasar's public URL, for links in posts <input type="url" @bind="_general.PublicUrl" placeholder="https://quasar.example.com" /></label>
+                    </div>
+                    <p class="assistant-hint"><code>/assistant</code> answers only in the admin channel, for Discord users mapped to a Quasar account, and there it can only propose changes.</p>
+
+                    <h2>General</h2>
+                    <div class="assistant-form">
+                        <label>Tool result limit (bytes) <input type="number" min="1024" max="1048576" @bind="_general.ResultCapBytes" /></label>
+                        <label>Delete conversations after (days) <input type="number" min="1" @bind="_general.ConversationRetentionDays" /></label>
+                        <label>Proposals and hand-overs expire after (days) <input type="number" min="1" @bind="_general.ProposalExpiryDays" /></label>
+                    </div>
+                </section>
+
+                <section>
+                    <h2>Usage, last 14 days</h2>
+                    @{ var summary = Metrics.Summarize(Time.GetUtcNow().AddDays(-14)); }
+                    <div class="assistant-table-wrap">
+                        <table>
+                            <thead><tr><th scope="col">Day (UTC)</th><th scope="col">Runs</th><th scope="col">Not answered</th><th scope="col">Prompt tokens</th><th scope="col">Of them cached</th></tr></thead>
+                            <tbody>
+                                @foreach (var day in summary.Days)
+                                {
+                                    <tr>
+                                        <th scope="row">@day.Day.ToString("yyyy-MM-dd")</th>
+                                        <td>@day.Runs</td>
+                                        <td>@day.Failed</td>
+                                        <td>@day.PromptTokens</td>
+                                        <td>@day.CachedTokens (@(day.PromptTokens == 0 ? 0 : 100 * day.CachedTokens / day.PromptTokens)%)</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="assistant-table-wrap">
+                        <table>
+                            <thead><tr><th scope="col">Backend</th><th scope="col">Answered turns</th><th scope="col">Failures</th><th scope="col">Passed over</th></tr></thead>
+                            <tbody>
+                                @foreach (var backend in summary.Backends)
+                                {
+                                    <tr><th scope="row">@backend.Backend</th><td>@backend.Answers</td><td>@backend.Failures</td><td>@backend.Fallovers</td></tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
+
+                break;
+            case "admin":
+                <section>
+                    <p class="assistant-hint">Admins chat with it in the web UI and with <code>/assistant</code> in the admin Discord channel.</p>
+                    <RoleEditor Form="_admin" Role="@AssistantRoles.Admin" AllBackends="BackendNames" Changed="Edited" Operations="ToolCatalog.OfRole(_operations, AssistantRoles.Admin).ToList()" />
+                    <SkillsEditor Role="@AssistantRoles.Admin" />
+                    <SkillSourcesEditor Role="@AssistantRoles.Admin" />
+                </section>
+
+                break;
+            case "support":
+                <section>
+                    <p class="assistant-hint">Players ask with <code>!ask</code> in game and <code>/ask</code> on Discord. The player agent only ever reaches the asking player's own grids and the server's public information.</p>
+                    <div class="assistant-form">
+                        <label class="assistant-check"><input type="checkbox" @bind="_player.Enabled" /> Answer players</label>
+                        <label>Questions a player has at most <input type="number" min="0" @bind="_player.MaxMessages" /></label>
+                        <label>Questions given back <input type="number" min="0" @bind="_player.RefillMessages" /></label>
+                        <label>Every (minutes) <input type="number" min="1" @bind="_player.RefillMinutes" /></label>
+                        <label>Actions per player a day (changes and hand-overs; restores have their own limits) <input type="number" min="0" @bind="_player.ActionsPerDay" /></label>
+                        <label class="assistant-check"><input type="checkbox" @bind="_player.QuasarBook" /> Let players' questions read the Quasar book (the admins' handbook)</label>
+                    </div>
+                    <label class="assistant-wide-field">Privacy notice, sent on a player's first question and once a month
+                        <textarea class="assistant-wide" rows="2" maxlength="1000" @bind="_player.PrivacyNotice" placeholder="@AskCommand.PrivacyNotice(Store.Current with { Player = Store.Current.Player with { PrivacyNotice = "" } })"></textarea>
+                    </label>
+
+                    <RoleEditor Form="_playerRole" Role="@AssistantRoles.Player" AllBackends="BackendNames" Changed="Edited" Operations="ToolCatalog.OfRole(_operations, AssistantRoles.Player).ToList()" />
+                    <SkillsEditor Role="@AssistantRoles.Player" />
+                    <SkillSourcesEditor Role="@AssistantRoles.Player" />
+
+                    <h3>Grid restores</h3>
+                    <p class="assistant-hint">The player names the grid; these rules decide the rest. In apply mode a restore runs at once for the causes ticked here; any other cause, a missing loss record or no free spot makes it a proposal. An undo gives the restore back to the player's quota.</p>
+                    <div class="assistant-form">
+                        <label>Placement
+                            <select @bind="_player.Placement">
+                                <option value="@RestorePlacements.Original">The original position, else a free spot nearby</option>
+                                <option value="@RestorePlacements.NearPlayer">Near the player</option>
+                                <option value="@RestorePlacements.NearPlayerStation">Near the player, as a station</option>
+                            </select>
+                        </label>
+                        <label>Distance from other players' grids (m) <input type="number" min="0" step="any" @bind="_player.ForeignExclusionMeters" /></label>
+                        <label>Search for a free spot up to (m) <input type="number" min="0" step="any" @bind="_player.MaxSearchMeters" /></label>
+                        <label class="assistant-check"><input type="checkbox" @bind="_player.EmptyInventories" /> Empty inventories and production queues</label>
+                        <label>Restores per player in 24 hours (empty: no limit) <input type="number" min="0" @bind="_player.PerDay" /></label>
+                        <label>In 7 days <input type="number" min="0" @bind="_player.PerWeek" /></label>
+                        <label>In 30 days <input type="number" min="0" @bind="_player.PerMonth" /></label>
+                    </div>
+                    <fieldset class="assistant-fieldset">
+                        <legend>Loss causes restored without an admin</legend>
+                        @foreach (var cause in RestoreRules.Causes)
+                        {
+                            <label class="assistant-check"><input type="checkbox" checked="@_player.AllowedCauses.Contains(cause)" @onchange="e => Toggle(_player.AllowedCauses, cause, e.Value is true)" /> @cause</label>
+                        }
+                    </fieldset>
+
+                </section>
+
+                break;
+            case "monitor":
+                <section>
+                    <p class="assistant-hint">Checks the standalone servers and clusters that should run, without a model. Only when a check finds a problem does it run a model in the monitor role, which looks for the cause and fixes it within the modes below. Admins read the result on the Monitor page, by web push and in the admin Discord channel. The monitor acts for nobody: Quasar limits it by the monitor roles on its Security page.</p>
+                    <div class="assistant-form">
+                        <label class="assistant-check"><input type="checkbox" @bind="_monitor.Enabled" /> Watch the servers and clusters</label>
+                        <label>Check every (s) <input type="number" min="10" @bind="_monitor.CheckSeconds" /></label>
+                        <label>Down or unhealthy this long is a problem (min) <input type="number" min="0" @bind="_monitor.GraceMinutes" /></label>
+                        <label>Lowest sim speed (0: no check) <input type="number" min="0" max="1" step="0.05" @bind="_monitor.MinSimSpeed" /></label>
+                        <label>Below it this long is a problem (min) <input type="number" min="0" @bind="_monitor.SlowMinutes" /></label>
+                        <label>Longest time without a world save (min, 0: no check) <input type="number" min="0" @bind="_monitor.MaxSaveAgeMinutes" /></label>
+                        <label>Run the model again for a problem still there after (min) <input type="number" min="1" @bind="_monitor.RecheckMinutes" /></label>
+                    </div>
+
+                    <h3>Script</h3>
+                    <p class="assistant-hint">Runs with every check as Quasar's own user, without a shell. Each line it prints is a problem. The text before the first <code>: </code> is the problem's key, and the same key means the same problem. A script that fails without printing anything is a problem too.</p>
+                    <div class="assistant-form">
+                        <label>Program (empty: no script) <input @bind="_monitor.ScriptCommand" placeholder="/opt/checks/disk.sh" /></label>
+                        <label>Arguments <input @bind="_monitor.ScriptArguments" /></label>
+                        <label>Timeout (s) <input type="number" min="1" @bind="_monitor.ScriptTimeoutSeconds" /></label>
+                    </div>
+
+                    <h3>Token budget</h3>
+                    <p class="assistant-hint">Counts the uncached input and output tokens of the monitor's runs per UTC calendar day, week (from Monday) or month. With no budget left no run starts and the admins are told once per period. A run stops before its next model turn once it has used up the rest.</p>
+                    <div class="assistant-form">
+                        <label>Tokens <input type="number" min="0" step="1000" @bind="_monitor.BudgetTokens" /></label>
+                        <label>Per
+                            <select @bind="_monitor.BudgetPeriod">
+                                @foreach (var period in Enum.GetValues<BudgetPeriod>())
+                                {
+                                    <option value="@period">@period.ToString().ToLowerInvariant()</option>
+                                }
+                            </select>
+                        </label>
+                    </div>
+                    <p role="status">@BudgetLine(Budget.Status())</p>
+
+                    <RoleEditor Form="_monitorRole" Role="@AssistantRoles.Monitor" AllBackends="BackendNames" Changed="Edited" Operations="ToolCatalog.OfRole(_operations, AssistantRoles.Monitor).ToList()" />
+                    <p class="assistant-hint">The monitor reads the admin assistant's skills, the written ones and those of its sources, and the skills of its own sources below.</p>
+                    <SkillSourcesEditor Role="@AssistantRoles.Monitor" />
+                </section>
+
+                break;
         }
-    </section>
-
-    <section>
-        <h2>Admin assistant</h2>
-        <p class="assistant-hint">Admins chat with it in the web UI and with <code>/assistant</code> in the admin Discord channel.</p>
-        <RoleEditor Form="_admin" Role="@AssistantRoles.Admin" AllBackends="BackendNames" Changed="Edited" Operations="ToolCatalog.OfRole(_operations, AssistantRoles.Admin).ToList()" />
-        <SkillsEditor Role="@AssistantRoles.Admin" />
-    </section>
-
-    <section>
-        <h2>Player support</h2>
-        <p class="assistant-hint">Players ask with <code>!ask</code> in game and <code>/ask</code> on Discord. The player agent only ever reaches the asking player's own grids and the server's public information.</p>
-        <div class="assistant-form">
-            <label class="assistant-check"><input type="checkbox" @bind="_player.Enabled" /> Answer players</label>
-            <label>Questions a player has at most <input type="number" min="0" @bind="_player.MaxMessages" /></label>
-            <label>Questions given back <input type="number" min="0" @bind="_player.RefillMessages" /></label>
-            <label>Every (minutes) <input type="number" min="1" @bind="_player.RefillMinutes" /></label>
-            <label>Actions per player a day (changes and hand-overs; restores have their own limits) <input type="number" min="0" @bind="_player.ActionsPerDay" /></label>
-            <label class="assistant-check"><input type="checkbox" @bind="_player.QuasarBook" /> Let players' questions read the Quasar book (the admins' handbook)</label>
-        </div>
-        <label class="assistant-wide-field">Privacy notice, sent on a player's first question and once a month
-            <textarea class="assistant-wide" rows="2" maxlength="1000" @bind="_player.PrivacyNotice" placeholder="@AskCommand.PrivacyNotice(Store.Current with { Player = Store.Current.Player with { PrivacyNotice = "" } })"></textarea>
-        </label>
-
-        <RoleEditor Form="_playerRole" Role="@AssistantRoles.Player" AllBackends="BackendNames" Changed="Edited" Operations="ToolCatalog.OfRole(_operations, AssistantRoles.Player).ToList()" />
-        <SkillsEditor Role="@AssistantRoles.Player" />
-
-        <h3>Grid restores</h3>
-        <p class="assistant-hint">The player names the grid; these rules decide the rest. In apply mode a restore runs at once for the causes ticked here; any other cause, a missing loss record or no free spot makes it a proposal. An undo gives the restore back to the player's quota.</p>
-        <div class="assistant-form">
-            <label>Placement
-                <select @bind="_player.Placement">
-                    <option value="@RestorePlacements.Original">The original position, else a free spot nearby</option>
-                    <option value="@RestorePlacements.NearPlayer">Near the player</option>
-                    <option value="@RestorePlacements.NearPlayerStation">Near the player, as a station</option>
-                </select>
-            </label>
-            <label>Distance from other players' grids (m) <input type="number" min="0" step="any" @bind="_player.ForeignExclusionMeters" /></label>
-            <label>Search for a free spot up to (m) <input type="number" min="0" step="any" @bind="_player.MaxSearchMeters" /></label>
-            <label class="assistant-check"><input type="checkbox" @bind="_player.EmptyInventories" /> Empty inventories and production queues</label>
-            <label>Restores per player in 24 hours (empty: no limit) <input type="number" min="0" @bind="_player.PerDay" /></label>
-            <label>In 7 days <input type="number" min="0" @bind="_player.PerWeek" /></label>
-            <label>In 30 days <input type="number" min="0" @bind="_player.PerMonth" /></label>
-        </div>
-        <fieldset class="assistant-fieldset">
-            <legend>Loss causes restored without an admin</legend>
-            @foreach (var cause in RestoreRules.Causes)
-            {
-                <label class="assistant-check"><input type="checkbox" checked="@_player.AllowedCauses.Contains(cause)" @onchange="e => Toggle(_player.AllowedCauses, cause, e.Value is true)" /> @cause</label>
-            }
-        </fieldset>
-
-    </section>
-
-    <section>
-        <h2>Monitor</h2>
-        <p class="assistant-hint">Checks the standalone servers and clusters that should run, without a model. Only when a check finds a problem does it run a model in the monitor role, which looks for the cause and fixes it within the modes below. Admins read the result on the Monitor page, by web push and in the admin Discord channel. The monitor acts for nobody: Quasar limits it by the monitor roles on its Security page.</p>
-        <div class="assistant-form">
-            <label class="assistant-check"><input type="checkbox" @bind="_monitor.Enabled" /> Watch the servers and clusters</label>
-            <label>Check every (s) <input type="number" min="10" @bind="_monitor.CheckSeconds" /></label>
-            <label>Down or unhealthy this long is a problem (min) <input type="number" min="0" @bind="_monitor.GraceMinutes" /></label>
-            <label>Lowest sim speed (0: no check) <input type="number" min="0" max="1" step="0.05" @bind="_monitor.MinSimSpeed" /></label>
-            <label>Below it this long is a problem (min) <input type="number" min="0" @bind="_monitor.SlowMinutes" /></label>
-            <label>Longest time without a world save (min, 0: no check) <input type="number" min="0" @bind="_monitor.MaxSaveAgeMinutes" /></label>
-            <label>Run the model again for a problem still there after (min) <input type="number" min="1" @bind="_monitor.RecheckMinutes" /></label>
-        </div>
-
-        <h3>Script</h3>
-        <p class="assistant-hint">Runs with every check as Quasar's own user, without a shell. Each line it prints is a problem. The text before the first <code>: </code> is the problem's key, and the same key means the same problem. A script that fails without printing anything is a problem too.</p>
-        <div class="assistant-form">
-            <label>Program (empty: no script) <input @bind="_monitor.ScriptCommand" placeholder="/opt/checks/disk.sh" /></label>
-            <label>Arguments <input @bind="_monitor.ScriptArguments" /></label>
-            <label>Timeout (s) <input type="number" min="1" @bind="_monitor.ScriptTimeoutSeconds" /></label>
-        </div>
-
-        <h3>Token budget</h3>
-        <p class="assistant-hint">Counts the uncached input and output tokens of the monitor's runs per UTC calendar day, week (from Monday) or month. With no budget left no run starts and the admins are told once per period. A run stops before its next model turn once it has used up the rest.</p>
-        <div class="assistant-form">
-            <label>Tokens <input type="number" min="0" step="1000" @bind="_monitor.BudgetTokens" /></label>
-            <label>Per
-                <select @bind="_monitor.BudgetPeriod">
-                    @foreach (var period in Enum.GetValues<BudgetPeriod>())
-                    {
-                        <option value="@period">@period.ToString().ToLowerInvariant()</option>
-                    }
-                </select>
-            </label>
-        </div>
-        <p role="status">@BudgetLine(Budget.Status())</p>
-
-        <RoleEditor Form="_monitorRole" Role="@AssistantRoles.Monitor" AllBackends="BackendNames" Changed="Edited" Operations="ToolCatalog.OfRole(_operations, AssistantRoles.Monitor).ToList()" />
-    </section>
-
-    <section>
-        <h2>Code execution</h2>
-        <p class="assistant-hint">The Quasar Sandbox runs Python and C# with no network, in a workspace per conversation, with limits on time, memory and disk. It is a separate server that runs on Linux; see <code>sandbox/README.md</code> in the plugin's repository. Each role turns it on or off under its own settings: on for the admin assistant and the monitor, off for the player agent by default. Its tools only change the sandbox's own files, so they run in read mode.</p>
-        <div class="assistant-form">
-            <label>Sandbox MCP URL (empty: off) <input type="url" @bind="_sandboxUrl" placeholder="http://127.0.0.1:8765/mcp" /></label>
-            <label>Token
-                <input type="password" autocomplete="new-password" @bind="_sandboxToken"
-                       placeholder="@(Store.HasSandboxToken ? "Set. Type a new token to replace it." : "Not set")" />
-            </label>
-        </div>
-        @foreach (var role in AssistantRoles.All)
-        {
-            @if (Registry.Status(role, SandboxSettings.ServerName) is { } status)
-            {
-                <p class="@(status.Error is null ? "assistant-hint" : "assistant-error")">@role: @(status.Error is null ? $"{status.Tools} tools, fetched {status.Time.UtcDateTime:yyyy-MM-dd HH:mm} UTC." : "fetching the tools failed: " + status.Error)</p>
-            }
-        }
-    </section>
-
-    <section>
-        <h2>Notifications and Discord</h2>
-        <div class="assistant-form">
-            <label class="assistant-check"><input type="checkbox" @bind="_general.Cards" /> Proposal cards in the conversation (the Approvals page is always there)</label>
-            <label class="assistant-check"><input type="checkbox" @bind="_general.WebPush" /> Web push to the admins who could approve a proposal or take a hand-over</label>
-            <label class="assistant-check"><input type="checkbox" @bind="_general.Discord" /> Post proposals and hand-overs in the admin Discord channel</label>
-            <label>Admin Discord channel ID <input inputmode="numeric" @bind="_general.AdminChannelId" placeholder="123456789012345678" /></label>
-            <label>Quasar's public URL, for links in posts <input type="url" @bind="_general.PublicUrl" placeholder="https://quasar.example.com" /></label>
-        </div>
-        <p class="assistant-hint"><code>/assistant</code> answers only in the admin channel, for Discord users mapped to a Quasar account, and there it can only propose changes.</p>
-
-        <h2>General</h2>
-        <div class="assistant-form">
-            <label>Tool result limit (bytes) <input type="number" min="1024" max="1048576" @bind="_general.ResultCapBytes" /></label>
-            <label>Delete conversations after (days) <input type="number" min="1" @bind="_general.ConversationRetentionDays" /></label>
-            <label>Proposals and hand-overs expire after (days) <input type="number" min="1" @bind="_general.ProposalExpiryDays" /></label>
-        </div>
-    </section>
-
-    <section>
-        <h2>Usage, last 14 days</h2>
-        @{ var summary = Metrics.Summarize(Time.GetUtcNow().AddDays(-14)); }
-        <div class="assistant-table-wrap">
-            <table>
-                <thead><tr><th scope="col">Day (UTC)</th><th scope="col">Runs</th><th scope="col">Not answered</th><th scope="col">Prompt tokens</th><th scope="col">Of them cached</th></tr></thead>
-                <tbody>
-                    @foreach (var day in summary.Days)
-                    {
-                        <tr>
-                            <th scope="row">@day.Day.ToString("yyyy-MM-dd")</th>
-                            <td>@day.Runs</td>
-                            <td>@day.Failed</td>
-                            <td>@day.PromptTokens</td>
-                            <td>@day.CachedTokens (@(day.PromptTokens == 0 ? 0 : 100 * day.CachedTokens / day.PromptTokens)%)</td>
-                        </tr>
-                    }
-                </tbody>
-            </table>
-        </div>
-        <div class="assistant-table-wrap">
-            <table>
-                <thead><tr><th scope="col">Backend</th><th scope="col">Answered turns</th><th scope="col">Failures</th><th scope="col">Passed over</th></tr></thead>
-                <tbody>
-                    @foreach (var backend in summary.Backends)
-                    {
-                        <tr><th scope="row">@backend.Backend</th><td>@backend.Answers</td><td>@backend.Failures</td><td>@backend.Fallovers</td></tr>
-                    }
-                </tbody>
-            </table>
-        </div>
-    </section>
+    </div>
 
     <section>
         <h2>Revert</h2>
@@ -297,6 +322,44 @@
 </div>
 
 @code {
+    /// <summary>The open tab, kept in the address so a reload or a link opens it again.</summary>
+    [SupplyParameterFromQuery(Name = "tab")] public string? Tab { get; set; }
+
+    private static readonly (string Id, string Label)[] Tabs =
+    [
+        ("providers", "Providers"),
+        ("admin", "Admin assistant"),
+        ("support", "Player support"),
+        ("monitor", "Monitor"),
+    ];
+
+    private string _tab = "providers";
+
+    protected override void OnParametersSet() =>
+        _tab = Tabs.Any(tab => tab.Id == Tab) ? Tab! : "providers";
+
+    private void Select(string id)
+    {
+        _tab = id;
+        Navigation.NavigateTo(Navigation.GetUriWithQueryParameter("tab", id), replace: true);
+    }
+
+    // Arrow keys move along the tabs, as in any tab list.
+    private void TabKey(KeyboardEventArgs e, string id)
+    {
+        var at = Array.FindIndex(Tabs, tab => tab.Id == id);
+        var next = e.Key switch
+        {
+            "ArrowRight" => (at + 1) % Tabs.Length,
+            "ArrowLeft" => (at + Tabs.Length - 1) % Tabs.Length,
+            "Home" => 0,
+            "End" => Tabs.Length - 1,
+            _ => -1,
+        };
+        if (next >= 0)
+            Select(Tabs[next].Id);
+    }
+
     private AssistantSettings _settings = new();
     private RoleForm _admin = new();
     private RoleForm _playerRole = new();
@@ -360,7 +423,7 @@
 
     protected override async Task OnInitializedAsync()
     {
-        _snapshot = ConfigSnapshot.Take(Store, Skills);
+        _snapshot = ConfigSnapshot.Take(Store, Skills, SkillSources);
         Load();
         _operations = await Catalog.AgentOperationsAsync();
     }
@@ -548,12 +611,12 @@
         Say($"Deleted {backend.Name}.");
     }
 
-    private void AskRevert() => _revertChanges = _snapshot.Changes(ConfigSnapshot.Take(Store, Skills));
+    private void AskRevert() => _revertChanges = _snapshot.Changes(ConfigSnapshot.Take(Store, Skills, SkillSources));
 
     private void Revert()
     {
         _reverting = true;
-        _snapshot.Restore(Store, Skills);
+        _snapshot.Restore(Store, Skills, SkillSources);
         Navigation.NavigateTo(Navigation.Uri, forceLoad: true);
     }
 
@@ -610,54 +673,6 @@
     {
         _message = message;
         _failed = failed;
-    }
-
-    private sealed class MonitorForm
-    {
-        public bool Enabled { get; set; }
-        public int CheckSeconds { get; set; }
-        public int GraceMinutes { get; set; }
-        public double MinSimSpeed { get; set; }
-        public int SlowMinutes { get; set; }
-        public int MaxSaveAgeMinutes { get; set; }
-        public int RecheckMinutes { get; set; }
-        public string ScriptCommand { get; set; } = "";
-        public string ScriptArguments { get; set; } = "";
-        public int ScriptTimeoutSeconds { get; set; }
-        public long BudgetTokens { get; set; }
-        public BudgetPeriod BudgetPeriod { get; set; }
-
-        public static MonitorForm From(MonitorSettings s) => new()
-        {
-            Enabled = s.Enabled,
-            CheckSeconds = s.CheckSeconds,
-            GraceMinutes = s.GraceMinutes,
-            MinSimSpeed = s.MinSimSpeed,
-            SlowMinutes = s.SlowMinutes,
-            MaxSaveAgeMinutes = s.MaxSaveAgeMinutes,
-            RecheckMinutes = s.RecheckMinutes,
-            ScriptCommand = s.ScriptCommand,
-            ScriptArguments = s.ScriptArguments,
-            ScriptTimeoutSeconds = s.ScriptTimeoutSeconds,
-            BudgetTokens = s.BudgetTokens,
-            BudgetPeriod = s.BudgetPeriod,
-        };
-
-        public MonitorSettings ToSettings() => new()
-        {
-            Enabled = Enabled,
-            CheckSeconds = Math.Max(10, CheckSeconds),
-            GraceMinutes = Math.Max(0, GraceMinutes),
-            MinSimSpeed = Math.Clamp(MinSimSpeed, 0, 1),
-            SlowMinutes = Math.Max(0, SlowMinutes),
-            MaxSaveAgeMinutes = Math.Max(0, MaxSaveAgeMinutes),
-            RecheckMinutes = Math.Max(1, RecheckMinutes),
-            ScriptCommand = ScriptCommand.Trim(),
-            ScriptArguments = ScriptArguments.Trim(),
-            ScriptTimeoutSeconds = Math.Max(1, ScriptTimeoutSeconds),
-            BudgetTokens = Math.Max(0, BudgetTokens),
-            BudgetPeriod = BudgetPeriod,
-        };
     }
 
     private sealed class GeneralForm

@@ -12,23 +12,31 @@ public sealed record SettingsSnapshot(
     IReadOnlyDictionary<string, string> McpHeaders
 );
 
-/// <summary>The assistant's whole configuration as the settings page found it: settings, API keys, MCP headers
-/// and skills. Reverting puts it all back.</summary>
+/// <summary>The assistant's whole configuration as the settings page found it: settings, API keys, MCP headers,
+/// skills and skill sources. Reverting puts it all back.</summary>
 public sealed record ConfigSnapshot(
     SettingsSnapshot Store,
-    IReadOnlyDictionary<string, IReadOnlyList<SkillPage>> Skills
+    IReadOnlyDictionary<string, IReadOnlyList<SkillPage>> Skills,
+    SkillSourceSnapshot Sources
 )
 {
     private const int ValueLength = 80;
 
-    public static ConfigSnapshot Take(SettingsStore store, SkillLibrary skills) =>
+    public static ConfigSnapshot Take(
+        SettingsStore store,
+        SkillLibrary skills,
+        SkillSourceStore sources
+    ) =>
         new(
             store.Snapshot(),
-            AssistantRoles.All.ToDictionary(role => role, role => skills.Skills(role))
+            AssistantRoles.All.ToDictionary(role => role, role => skills.Skills(role)),
+            sources.Snapshot()
         );
 
-    public void Restore(SettingsStore store, SkillLibrary skills)
+    public void Restore(SettingsStore store, SkillLibrary skills, SkillSourceStore sources)
     {
+        // The sources first: a written skill may take back a name a source has now.
+        sources.Restore(Sources);
         foreach (var role in AssistantRoles.All)
         {
             var kept = Skills.GetValueOrDefault(role) ?? [];
@@ -73,8 +81,22 @@ public sealed record ConfigSnapshot(
                 else if (text != was)
                     lines.Add($"Skill {role}/{name}: its old text restored");
         }
+        foreach (
+            var key in Sources
+                .Entries.Keys.Union(now.Sources.Entries.Keys)
+                .Order(StringComparer.Ordinal)
+        )
+            if (!now.Sources.Entries.TryGetValue(key, out var current))
+                lines.Add($"Skill source {key}: restored");
+            else if (!Sources.Entries.TryGetValue(key, out var was))
+                lines.Add($"Skill source {key}: removed");
+            else if (Json(current) != Json(was))
+                lines.Add($"Skill source {key}: its old settings and skills restored");
+        Secrets(lines, "Token of the skill source", Sources.Tokens, now.Sources.Tokens);
         return lines;
     }
+
+    private static string Json(object value) => JsonSerializer.Serialize(value, JsonFiles.Options);
 
     // Encrypted values differ on every save, so a key typed again counts as changed.
     private static void Secrets(

@@ -17,10 +17,31 @@ public sealed class GitFetcher
     public const int MaxBytes = 1024 * 1024;
     public static readonly TimeSpan Timeout = TimeSpan.FromSeconds(90);
 
-    public async Task<GitSkill> FetchAsync(
+    public Task<GitSkill> FetchAsync(
         GitSkillUrl url,
         string? token,
         string workRoot,
+        CancellationToken cancel
+    ) =>
+        CheckoutAsync(
+            url.Repository,
+            url.Ref,
+            url.Path.Length > 0 ? [url.Path] : [],
+            token,
+            workRoot,
+            (work, revision) => new GitSkill(revision, ReadFolder(work, url.Path, revision)),
+            cancel
+        );
+
+    /// <summary>Checks out <paramref name="paths"/> (all of it when empty) of one commit into a scratch folder,
+    /// hands the folder and the commit to <paramref name="read"/> and deletes the folder.</summary>
+    public async Task<T> CheckoutAsync<T>(
+        string repository,
+        string gitRef,
+        IReadOnlyList<string> paths,
+        string? token,
+        string workRoot,
+        Func<string, string, T> read,
         CancellationToken cancel
     )
     {
@@ -31,9 +52,9 @@ public sealed class GitFetcher
         try
         {
             await RunAsync(work, token, limit.Token, "init", "-q");
-            await RunAsync(work, token, limit.Token, "remote", "add", "origin", url.Repository);
-            if (url.Path.Length > 0)
-                await RunAsync(work, token, limit.Token, "sparse-checkout", "set", url.Path);
+            await RunAsync(work, token, limit.Token, "remote", "add", "origin", repository);
+            if (paths.Count > 0)
+                await RunAsync(work, token, limit.Token, ["sparse-checkout", "set", .. paths]);
             await RunAsync(
                 work,
                 token,
@@ -44,13 +65,13 @@ public sealed class GitFetcher
                 "1",
                 "--filter=blob:none",
                 "origin",
-                url.Ref.Length > 0 ? url.Ref : "HEAD"
+                gitRef.Length > 0 ? gitRef : "HEAD"
             );
             await RunAsync(work, token, limit.Token, "checkout", "-q", "FETCH_HEAD");
             var revision = (
                 await RunAsync(work, token, limit.Token, "rev-parse", "FETCH_HEAD")
             ).Trim();
-            return new(revision, ReadFolder(work, url.Path, revision));
+            return read(work, revision);
         }
         catch (OperationCanceledException) when (!cancel.IsCancellationRequested)
         {
@@ -60,6 +81,20 @@ public sealed class GitFetcher
         {
             Delete(work);
         }
+    }
+
+    /// <summary>The commit checked out in <paramref name="folder"/> when it is in a Git work tree, else null.</summary>
+    public async Task<string?> LocalRevisionAsync(string folder, CancellationToken cancel)
+    {
+        using var limit = CancellationTokenSource.CreateLinkedTokenSource(cancel);
+        limit.CancelAfter(Timeout);
+        try
+        {
+            return (await RunAsync(folder, null, limit.Token, "rev-parse", "HEAD")).Trim();
+        }
+        catch (LoreFetchException) { }
+        catch (OperationCanceledException) when (!cancel.IsCancellationRequested) { }
+        return null;
     }
 
     /// <summary>Reads a skill folder on the Quasar host, with the limits of a fetched one. The revision is the
@@ -77,16 +112,7 @@ public sealed class GitFetcher
         {
             throw new LoreFetchException($"The folder {folder} could not be read: {error.Message}");
         }
-        string? revision = null;
-        using var limit = CancellationTokenSource.CreateLinkedTokenSource(cancel);
-        limit.CancelAfter(Timeout);
-        try
-        {
-            revision = (await RunAsync(folder, null, limit.Token, "rev-parse", "HEAD")).Trim();
-        }
-        catch (LoreFetchException) { }
-        catch (OperationCanceledException) when (!cancel.IsCancellationRequested) { }
-        return new(revision, files);
+        return new(await LocalRevisionAsync(folder, cancel), files);
     }
 
     private static List<(string, string)> ReadFolder(string work, string path, string revision)
