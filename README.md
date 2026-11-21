@@ -253,7 +253,7 @@ use `/ask`. New proposals and hand-overs can be posted to the admin channel with
 | `/assistant/approvals` | `CanUseAssistant` | Players waiting for an admin, pending and decided proposals. Marking a hand-over handled needs `CanControlServers`. |
 | `/assistant/monitor` | `CanUseAssistant` | The monitor's open and resolved incidents, each run's answer, tokens and cost, and the budget. |
 | `/assistant/lore` | `CanEditServers` | The lore of each server and cluster: free text or a Git skill, its fetch state and errors, Refresh. |
-| `/assistant/settings` | `CanManageSecurity` | In tabs. **Providers**: backends, their API keys, prices and priority; the sandbox's URL and token; notifications, Discord, general limits and usage. **Admin**, **Support** and **Monitor**: per role the backend order, modes, limits, code execution, MCP servers, skills and skill sources; Support also player support and restore rules, Monitor its checks, script and budget. `?tab=admin` and so on opens a tab. |
+| `/assistant/settings` | `CanManageSecurity` | In tabs. **Providers**: backends, their API keys, prices and priority; the sandbox's URL and token; notifications, Discord, general limits and usage. **Admin assistant**, **Player support** and **Monitor**: per role the backend order, modes, limits, code execution, MCP servers, skills and skill sources; Player support also its quotas, privacy notice and restore rules, Monitor its checks, script and budget. `?tab=admin` and so on opens a tab. |
 
 The chat shows the assistant's answers and the monitor's runs as Markdown: headings, lists, emphasis, code,
 links and tables. HTML in an answer shows as text, and links open only http, https and mailto URLs and Quasar's

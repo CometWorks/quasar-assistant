@@ -113,5 +113,6 @@ body:has(.assistant-page) :is(.assistant-launcher, .assistant-drawer) { display:
 .assistant-tab:hover { color: var(--quasar-palette-text-primary, #e6e9ee); background: var(--quasar-palette-hover-background, #ffffff12); }
 .assistant-tab-selected { color: var(--quasar-palette-primary, #56c8dc); border-bottom-color: var(--quasar-palette-primary, #56c8dc); }
 .assistant-tab:focus-visible { outline: 2px solid var(--quasar-palette-primary, #56c8dc); outline-offset: -2px; }
-.assistant-tab-panel > section:first-child h2 { margin-top: 16px; }
+.assistant-tab-panel { padding-top: 16px; }
+.assistant-tab-panel > section:first-child > h2:first-child { margin-top: 0; }
 .assistant-skill-list { margin: 4px 0 0; padding-left: 18px; }

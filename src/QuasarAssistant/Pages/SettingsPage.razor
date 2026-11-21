@@ -194,7 +194,6 @@
                 break;
             case "admin":
                 <section>
-                    <h2>Admin assistant</h2>
                     <p class="assistant-hint">Admins chat with it in the web UI and with <code>/assistant</code> in the admin Discord channel.</p>
                     <RoleEditor Form="_admin" Role="@AssistantRoles.Admin" AllBackends="BackendNames" Changed="Edited" Operations="ToolCatalog.OfRole(_operations, AssistantRoles.Admin).ToList()" />
                     <SkillsEditor Role="@AssistantRoles.Admin" />
@@ -204,7 +203,6 @@
                 break;
             case "support":
                 <section>
-                    <h2>Player support</h2>
                     <p class="assistant-hint">Players ask with <code>!ask</code> in game and <code>/ask</code> on Discord. The player agent only ever reaches the asking player's own grids and the server's public information.</p>
                     <div class="assistant-form">
                         <label class="assistant-check"><input type="checkbox" @bind="_player.Enabled" /> Answer players</label>
@@ -252,7 +250,6 @@
                 break;
             case "monitor":
                 <section>
-                    <h2>Monitor</h2>
                     <p class="assistant-hint">Checks the standalone servers and clusters that should run, without a model. Only when a check finds a problem does it run a model in the monitor role, which looks for the cause and fixes it within the modes below. Admins read the result on the Monitor page, by web push and in the admin Discord channel. The monitor acts for nobody: Quasar limits it by the monitor roles on its Security page.</p>
                     <div class="assistant-form">
                         <label class="assistant-check"><input type="checkbox" @bind="_monitor.Enabled" /> Watch the servers and clusters</label>
@@ -331,8 +328,8 @@
     private static readonly (string Id, string Label)[] Tabs =
     [
         ("providers", "Providers"),
-        ("admin", "Admin"),
-        ("support", "Support"),
+        ("admin", "Admin assistant"),
+        ("support", "Player support"),
         ("monitor", "Monitor"),
     ];
 

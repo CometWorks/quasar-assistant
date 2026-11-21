@@ -364,7 +364,7 @@ def main() -> int:
                 if mode == "before":
                     page.screenshot(path=out / f"settings-{scheme}.png", full_page=True)
                 else:
-                    for tab in ("Providers", "Admin", "Support", "Monitor"):
+                    for tab in ("Providers", "Admin assistant", "Player support", "Monitor"):
                         page.get_by_role("tab", name=tab).click()
                         page.wait_for_function(
                             "t => document.querySelector('[role=tab][aria-selected=true]')?.textContent === t",
@@ -386,7 +386,7 @@ def main() -> int:
                 )
                 dismiss_setup(page)
                 check(
-                    page.get_by_role("tab", name="Support").get_attribute(
+                    page.get_by_role("tab", name="Player support").get_attribute(
                         "aria-selected"
                     )
                     == "true",
