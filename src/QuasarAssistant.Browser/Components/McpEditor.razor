@@ -1,13 +1,11 @@
-@using QuasarAssistant.Mcp
-@inject McpRegistry Registry
-@inject SettingsStore Store
+@inherits PanelComponent
 
 <h3>MCP servers</h3>
-<p class="assistant-hint">Remote MCP servers over streamable HTTP. Their tools are fetched when a change is saved and when Quasar starts. Tools you mark read-only follow the mode of <code>quasar.assistant/@McpRegistry.ReadOperation(Role)</code>; every other tool is always a proposal and can't be undone. Calls go through Quasar as the <code>@McpRegistry.ReadOperation(Role)</code> and <code>@McpRegistry.CallOperation(Role)</code> operations, so they are checked and audited.</p>
+<p class="assistant-hint">Remote MCP servers over streamable HTTP. Their tools are fetched when a change is saved and when Quasar starts. Tools you mark read-only follow the mode of <code>quasar.assistant/@(Role == AssistantRoles.Admin ? "mcp.read" : $"mcp.{Role}.read")</code>; every other tool is always a proposal and can't be undone. Calls go through Quasar as the <code>@(Role == AssistantRoles.Admin ? "mcp.read" : $"mcp.{Role}.read")</code> and <code>@(Role == AssistantRoles.Admin ? "mcp.call" : $"mcp.{Role}.call")</code> operations, so they are checked and audited.</p>
 @foreach (var server in Servers)
 {
-    var status = server.Original is null ? null : Registry.Status(Role, server.Original);
-    var tools = server.Original is null ? new List<McpTool>() : Registry.Tools(Role).Where(t => t.Server == server.Original).ToList();
+    var status = server.Original is null ? null : Panel.Servers.FirstOrDefault(s => s.Role == Role && s.Server == server.Original);
+    var tools = status?.Tools ?? [];
     <fieldset class="assistant-fieldset">
         <legend>@(string.IsNullOrWhiteSpace(server.Name) ? "New server" : server.Name)</legend>
         <div class="assistant-form">
@@ -16,17 +14,17 @@
             <label class="assistant-check"><input type="checkbox" @bind="server.Enabled" @bind:after="Notify" /> Enabled</label>
             <label>Headers, one <code>Name: value</code> per line
                 <textarea rows="2" @bind="server.Headers" @bind:after="Notify"
-                          placeholder="@(server.Original is not null && Store.McpHeaderNames(Role, server.Original) is { Count: > 0 } names ? "Set: " + string.Join(", ", names) + ". Type new ones to replace them." : "None")"></textarea>
+                          placeholder="@(server.Original is not null && (status?.Headers ?? []) is { Count: > 0 } names ? "Set: " + string.Join(", ", names) + ". Type new ones to replace them." : "None")"></textarea>
             </label>
-            @if (server.Original is not null && Store.McpHeaderNames(Role, server.Original).Count > 0)
+            @if (server.Original is not null && (status?.Headers ?? []).Count > 0)
             {
                 <label class="assistant-check"><input type="checkbox" @bind="server.RemoveHeaders" @bind:after="Notify" /> Remove the stored headers</label>
             }
         </div>
-        @if (status is not null)
+        @if (status?.Time is { } fetched)
         {
             <p class="@(status.Error is null ? "assistant-hint" : "assistant-error")">
-                @(status.Error is null ? $"{status.Tools} tools, fetched {status.Time.UtcDateTime:yyyy-MM-dd HH:mm} UTC." : $"Fetching the tools failed: {status.Error}")
+                @(status.Error is null ? $"{status.Tools.Count} tools, fetched {fetched.UtcDateTime:yyyy-MM-dd HH:mm} UTC." : $"Fetching the tools failed: {status.Error}")
             </p>
         }
         @if (tools.Count > 0)
@@ -53,6 +51,8 @@
     <button type="button" class="assistant-button" disabled="@_refreshing" @onclick="RefreshAsync"><AssistantIcon Icon="@AssistantIcons.Refresh" />Fetch tools again</button>
 </div>
 
+@if (PanelError is not null) { <p class="assistant-error" role="alert">@PanelError</p> }
+
 @code {
     [Parameter, EditorRequired] public string Role { get; set; } = "";
     [Parameter, EditorRequired] public List<McpServerForm> Servers { get; set; } = [];
@@ -60,6 +60,8 @@
     /// <summary>Raised after every edit, so the page saves it.</summary>
     [Parameter] public EventCallback Changed { get; set; }
 
+    [CascadingParameter] public SettingsPanel Panel { get; set; } = null!;
+    [CascadingParameter] public EventCallback Reload { get; set; }
     private bool _refreshing;
 
     private Task Notify() => Changed.InvokeAsync();
@@ -90,7 +92,7 @@
         _refreshing = true;
         try
         {
-            await Registry.RefreshAsync();
+            await Try(async () => { await Request("settings.mcp.refresh"); await Reload.InvokeAsync(); });
         }
         finally
         {

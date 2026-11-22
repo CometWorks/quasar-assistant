@@ -392,12 +392,23 @@ public sealed class SkillSourceTests
         Assert.Equal(
             [
                 SettingsApi.SetBackends,
+                "settings.changes",
+                "settings.mcp.refresh",
+                "settings.panel",
                 SettingsApi.Read,
+                "settings.revert",
                 SettingsApi.SetRole,
+                "settings.save",
+                "settings.snapshot",
+                "settings.test",
                 SettingsApi.ListSkills,
                 SettingsApi.RefreshSource,
                 SettingsApi.RemoveSource,
                 SettingsApi.SetSource,
+                "skills.source.upload",
+                "skills.sources",
+                "skills.write",
+                "skills.written",
             ],
             operations.Select(operation => operation.OperationId).Order(StringComparer.Ordinal)
         );

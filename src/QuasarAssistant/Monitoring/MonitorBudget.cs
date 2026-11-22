@@ -8,19 +8,6 @@ namespace QuasarAssistant.Monitoring;
 /// <param name="SpentUsd">What those runs cost, all tokens counted; null when a backend that answered has no prices.</param>
 /// <param name="LimitUsd">The budget in money at the input/output mix of this period's runs, or of 90% input
 /// when there were none; null without prices.</param>
-public sealed record BudgetStatus(
-    BudgetPeriod Period,
-    DateTimeOffset Start,
-    DateTimeOffset Resets,
-    long Limit,
-    long Spent,
-    double? SpentUsd,
-    double? LimitUsd
-)
-{
-    public long Left => Math.Max(0, Limit - Spent);
-}
-
 /// <summary>The monitor's token budget per UTC calendar day, week (from Monday) or month, counted from
 /// <c>metrics.jsonl</c>.</summary>
 public sealed class MonitorBudget(SettingsStore settings, MetricsLog metrics, TimeProvider time)

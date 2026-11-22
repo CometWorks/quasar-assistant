@@ -1,5 +1,4 @@
-@inject ProposalService Service
-@inject IAuthorizationService Authorization
+@inherits PanelComponent
 
 <article class="assistant-proposal assistant-proposal-@Proposal.Status.ToString().ToLowerInvariant()" aria-label="Proposal @Proposal.Id">
     <header>
@@ -28,7 +27,7 @@
     {
         <p class="assistant-proposal-outcome">@outcome</p>
     }
-    @if (Proposal.Status == ProposalStatus.Pending && _canApprove)
+    @if (Proposal.Status == ProposalStatus.Pending && CanApprove)
     {
         <div class="assistant-row">
             <button type="button" class="assistant-button assistant-button-primary" disabled="@_busy" @onclick="ApproveAsync">Approve</button>
@@ -36,29 +35,17 @@
             <button type="button" class="assistant-button" disabled="@_busy" @onclick="RejectAsync">Reject</button>
         </div>
     }
-    @if (_error is not null)
-    {
-        <p class="assistant-error" role="alert">@_error</p>
-    }
 </article>
 
+@if (PanelError is not null) { <p class="assistant-error" role="alert">@PanelError</p> }
+
 @code {
-    [CascadingParameter] private Task<AuthenticationState> Authentication { get; set; } = null!;
     [Parameter, EditorRequired] public Proposal Proposal { get; set; } = null!;
     [Parameter] public bool ShowAsker { get; set; }
 
-    private ClaimsPrincipal _user = new();
-    private bool _canApprove;
+    [Parameter] public bool CanApprove { get; set; }
     private bool _busy;
     private string? _reason;
-    private string? _error;
-
-    protected override async Task OnParametersSetAsync()
-    {
-        _user = (await Authentication).User;
-        _canApprove = await Service.CanApproveAsync(_user, Authorization, Proposal);
-    }
-
     private string StatusText => Proposal.Status switch
     {
         ProposalStatus.Pending => "Waiting for approval",
@@ -68,21 +55,12 @@
         _ => "Expired",
     };
 
-    private Task ApproveAsync() => DecideAsync(token => Service.ApproveAsync(_user, Proposal.Id, token));
-
-    private Task RejectAsync() => DecideAsync(token => Service.RejectAsync(_user, Proposal.Id, _reason, token));
-
-    private async Task DecideAsync(Func<CancellationToken, Task<string?>> decide)
+    private Task ApproveAsync() => Decide(true);
+    private Task RejectAsync() => Decide(false);
+    private Task Decide(bool approve) => Try(async () =>
     {
         _busy = true;
-        _error = null;
-        try
-        {
-            _error = await decide(CancellationToken.None);
-        }
-        finally
-        {
-            _busy = false;
-        }
-    }
+        try { await Request("approvals.decide", new Decision(Proposal.Id, approve, _reason)); }
+        finally { _busy = false; }
+    });
 }

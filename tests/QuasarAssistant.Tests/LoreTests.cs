@@ -384,7 +384,7 @@ public sealed class LoreTests
             .ToList();
 
         Assert.Equal(
-            [LoreOperations.List, LoreOperations.Refresh, LoreOperations.Set],
+            [LoreOperations.List, LoreOperations.Refresh, "lore.save", LoreOperations.Set, "lore.targets"],
             operations.Select(operation => operation.OperationId).Order()
         );
         Assert.All(

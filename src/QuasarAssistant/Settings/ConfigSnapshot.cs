@@ -59,6 +59,11 @@ public sealed record ConfigSnapshot(
         {
             var had = before.TryGetValue(path, out var old);
             var has = after.TryGetValue(path, out var current);
+            if (path.Contains(".headers", StringComparison.OrdinalIgnoreCase))
+            {
+                if (old != current) lines.Add($"{path}: headers restored");
+                continue;
+            }
             if (had && has && old != current)
                 lines.Add($"{path}: {Short(current!)} back to {Short(old!)}");
             else if (had && !has)

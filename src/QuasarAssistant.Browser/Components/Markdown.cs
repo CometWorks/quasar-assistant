@@ -290,7 +290,7 @@ public static partial class Markdown
 
     private static string Anchor(string url, string label) =>
         url.StartsWith('/')
-            ? $"<a href=\"{Encode(url)}\">{label}</a>"
+            ? $"<a href=\"./{Encode(url[1..])}\">{label}</a>"
             : $"<a href=\"{Encode(url)}\" target=\"_blank\" rel=\"noopener noreferrer nofollow\">{label}</a>";
 
     /// <summary>http, https and mailto URLs, and paths on this site; never javascript:, data: or the like.</summary>

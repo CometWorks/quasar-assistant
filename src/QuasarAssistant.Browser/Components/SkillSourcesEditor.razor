@@ -1,20 +1,17 @@
+@inherits PanelComponent
 @using System.Text.Json
-@using Microsoft.Extensions.DependencyInjection
-@using Quasar.Plugin.Abstractions.Operations
 @using QuasarAssistant.Lore
 @using QuasarAssistant.Skills
-@inject SkillSourceStore Sources
-@inject IServiceProvider Services
 
 @* A role's skill sources: Git repository folders, uploaded ZIPs and single SKILL.md files. Changes go through core's
    dispatcher like the API, so they are checked and audited. *@
 <h3>Skill sources</h3>
-<p class="assistant-hint">Skills from a GitHub (or GitLab, Forgejo) repository, a ZIP or a single <code>SKILL.md</code>. Every <code>SKILL.md</code> is a skill, named by the <code>name:</code> in its front matter or else by its folder; the text files next to it stay with it. A repository is fetched when you add it, when you refresh it and every @LoreStore.RefreshInterval.TotalHours hours. If a fetch fails, the assistant keeps the last good copy.</p>
+<p class="assistant-hint">Skills from a GitHub (or GitLab, Forgejo) repository, a ZIP or a single <code>SKILL.md</code>. Every <code>SKILL.md</code> is a skill, named by the <code>name:</code> in its front matter or else by its folder; the text files next to it stay with it. A repository is fetched when you add it, when you refresh it and every 6 hours. If a fetch fails, the assistant keeps the last good copy.</p>
 @if (_message is not null)
 {
     <p class="@(_failed ? "assistant-error" : "assistant-notice")" role="@(_failed ? "alert" : "status")">@_message</p>
 }
-@{ var sources = Sources.List(Role); }
+@{ var sources = _sources; }
 @if (sources.Count > 0)
 {
     <div class="assistant-table-wrap">
@@ -88,25 +85,29 @@ else
         }
         else
         {
-            <label>@(_kind == SkillSourceKinds.Zip ? "ZIP file, up to " + SkillTree.MaxZipBytes / 1024 / 1024 + " MiB" : "SKILL.md file")
-                <InputFile accept="@(_kind == SkillSourceKinds.Zip ? ".zip,application/zip" : ".md,text/markdown")" OnChange="PickAsync" />
+            <label>@(_kind == SkillSourceKinds.Zip ? "ZIP file, up to 16 MiB" : "SKILL.md file")
+                <InputFile @ref="_fileInput" accept="@(_kind == SkillSourceKinds.Zip ? ".zip,application/zip" : ".md,text/markdown")" OnChange="Pick" />
             </label>
             @if (_fileName is not null)
             {
-                <p class="assistant-hint">@_fileName, @(_content?.Length ?? 0) bytes</p>
+                <p class="assistant-hint">@_fileName, @_size bytes</p>
             }
         }
         <div class="assistant-row">
-            <button type="submit" class="assistant-button assistant-button-primary" disabled="@(_busy || (_kind != SkillSourceKinds.Git && _content is null))">@(_busy ? "Reading..." : "Save")</button>
+            <button type="submit" class="assistant-button assistant-button-primary" disabled="@(_busy || (_kind != SkillSourceKinds.Git && _fileName is null))">@(_busy ? "Reading..." : "Save")</button>
             <button type="button" class="assistant-button" @onclick="() => _kind = null">Cancel</button>
         </div>
     </form>
 }
 
+@if (PanelError is not null) { <p class="assistant-error" role="alert">@PanelError</p> }
+
 @code {
     [Parameter, EditorRequired] public string Role { get; set; } = "";
-    [CascadingParameter] private Task<AuthenticationState> Authentication { get; set; } = null!;
 
+    private List<SkillSourceView> _sources = [];
+    private async Task Refresh() => _sources = await Read<List<SkillSourceView>>("skills.sources",new ItemId(Role));
+    protected override Task OnInitializedAsync() => Try(Refresh);
     private string? _kind;
     private bool _editing;
     private string _name = "";
@@ -117,7 +118,8 @@ else
     private bool _tokenSet;
     private bool _removeToken;
     private string? _fileName;
-    private byte[]? _content;
+    private InputFile? _fileInput;
+    private long _size;
     private bool _busy;
     private string? _message;
     private bool _failed;
@@ -147,7 +149,7 @@ else
         _name = _repository = _ref = _paths = _token = "";
         _tokenSet = _removeToken = false;
         _fileName = null;
-        _content = null;
+        _size = 0;
         _message = null;
     }
 
@@ -175,25 +177,14 @@ else
             }
     }
 
-    private async Task PickAsync(InputFileChangeEventArgs e)
+    private void Pick(InputFileChangeEventArgs e)
     {
-        _content = null;
+        _fileName = null;
+        if (e.File.Size > 16 * 1024 * 1024) { Fail("The file exceeds 16 MiB."); return; }
         _fileName = e.File.Name;
-        try
-        {
-            await using var stream = e.File.OpenReadStream(SkillTree.MaxZipBytes);
-            using var buffer = new MemoryStream();
-            await stream.CopyToAsync(buffer);
-            _content = buffer.ToArray();
-            if (_name.Length == 0)
-                _name = SkillLibrary.IsValidName(Path.GetFileNameWithoutExtension(e.File.Name)) && _kind == SkillSourceKinds.Zip
-                    ? Path.GetFileNameWithoutExtension(e.File.Name)
-                    : "";
-        }
-        catch (IOException error)
-        {
-            Fail("The file could not be read: " + error.Message);
-        }
+        _size = e.File.Size;
+        var suggested = Path.GetFileNameWithoutExtension(_fileName);
+        if (_name.Length == 0 && _kind == SkillSourceKinds.Zip && ValidName(suggested)) _name = suggested;
     }
 
     private async Task SaveAsync()
@@ -207,11 +198,11 @@ else
             _ref.Trim(),
             _paths.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries),
             Token: token,
-            Content: _content is null ? null : Convert.ToBase64String(_content),
             FileName: _fileName);
-        if (await RunAsync(SettingsApi.SetSource, request) && Sources.Get(Role, request.Name) is { } view)
+        if (await RunAsync(_kind == SkillSourceKinds.Git ? "skills.source.set" : "skills.source.upload", request) && _sources.Find(s => s.Name == request.Name) is { } view)
         {
             _kind = null;
+            _token = "";
             if (view.Error is { } error)
                 Fail("Saved, but the repository could not be fetched: " + error);
             else
@@ -221,7 +212,7 @@ else
 
     private async Task RefreshAsync(SkillSourceView source)
     {
-        if (await RunAsync(SettingsApi.RefreshSource, new SkillSourceRequest(Role, source.Name)) && Sources.Get(Role, source.Name) is { } view)
+        if (await RunAsync("skills.source.refresh", new SkillRef(Role, source.Name)) && _sources.Find(s => s.Name == source.Name) is { } view)
         {
             if (view.Error is { } error)
                 Fail("The repository could not be fetched: " + error);
@@ -232,7 +223,7 @@ else
 
     private async Task RemoveAsync(SkillSourceView source)
     {
-        if (await RunAsync(SettingsApi.RemoveSource, new SkillSourceRequest(Role, source.Name)))
+        if (await RunAsync("skills.source.remove", new SkillRef(Role, source.Name)))
             Say($"Removed {source.Name}.");
     }
 
@@ -244,21 +235,12 @@ else
         _failed = false;
         try
         {
-            var user = (await Authentication).User;
-            await using var scope = Services.CreateAsyncScope();
-            var result = await scope.ServiceProvider.GetRequiredService<IQuasarOperationDispatcher>().DispatchAsync(
-                new QuasarOperationContext(user, scope.ServiceProvider),
-                AssistantServiceCollectionExtensions.PluginId,
-                operation,
-                JsonSerializer.SerializeToElement(request, JsonSerializerOptions.Web),
-                CancellationToken.None);
-            if (result.Error is not null)
-            {
-                Fail(result.Error);
-                return false;
-            }
+            if (operation == "skills.source.upload") await UploadFile(operation,request,_fileInput!.Element!.Value);
+            else await Request(operation,request);
+            await Refresh();
             return true;
         }
+        catch (Exception e) { Fail(e.Message); return false; }
         finally
         {
             _busy = false;

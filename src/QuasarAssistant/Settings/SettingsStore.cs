@@ -42,6 +42,11 @@ public sealed class SettingsStore
         }
     }
 
+    internal void Edit(Action edit)
+    {
+        lock (_lock) edit();
+    }
+
     public void Save(AssistantSettings settings)
     {
         lock (_lock)

@@ -1,17 +1,15 @@
+@inherits PanelComponent
 @* The chat drawer on every page (QuasarExtensionTargets.LayoutDrawer, policy CanUseAssistant). *@
-@implements IDisposable
-@inject SettingsStore Settings
 
-@if (!_configured)
+@if (_state is { Configured: false, CanConfigure: true })
 {
     @* Without a backend the chat can't answer, so only those who can add one see the launcher, as a link to the settings. *@
-    <AuthorizeView Policy="@QuasarPolicyNames.CanManageSecurity">
-        <a class="assistant-launcher" href="assistant/settings" title="Set up the assistant" aria-label="Set up the assistant: add a model backend">
-            <AssistantIcon Icon="@AssistantIcons.Sparkles" />
-        </a>
-    </AuthorizeView>
+
+    <a class="assistant-launcher" href="assistant/settings" title="Set up the assistant" aria-label="Set up the assistant: add a model backend">
+        <AssistantIcon Icon="@AssistantIcons.Sparkles" />
+    </a>
 }
-else if (_open)
+else if (_state?.Configured == true && _open)
 {
     <aside class="assistant-drawer" aria-label="Assistant">
         <header class="assistant-drawer-header">
@@ -26,41 +24,32 @@ else if (_open)
                 <AssistantIcon Icon="@AssistantIcons.Close" />
             </button>
         </header>
-        <ChatView @key="_conversationId" ConversationId="@_conversationId" Page="@(new PageContext(PageUri, ServerName))" Compact="true"
+        <ChatView @key="_conversationId" ConversationId="@_conversationId" PageUri="@PageUri" ServerName="@ServerName" Compact="true"
                   ConversationStarted="id => _conversationId = id" />
     </aside>
 }
-else
+else if (_state?.Configured == true)
 {
     <button type="button" class="assistant-launcher" title="Assistant" aria-label="Open the assistant" @onclick="() => _open = true">
         <AssistantIcon Icon="@AssistantIcons.Sparkles" />
     </button>
 }
 
+@if (PanelError is not null) { <p class="assistant-error" role="alert">@PanelError</p> }
+
 @code {
     [Parameter] public string PageUri { get; set; } = "";
     [Parameter] public string? ServerName { get; set; }
 
     private bool _open;
-    private bool _configured;
+    private PanelStatus? _state;
     private string? _conversationId;
 
-    protected override void OnInitialized()
+    protected override Task OnInitializedAsync() => Try(async () =>
     {
-        _configured = IsConfigured();
-        Settings.Changed += OnSettingsChanged;
-    }
-
-    private bool IsConfigured() => Settings.Current.BackendsOf(AssistantRoles.Admin).Count > 0;
-
-    private void OnSettingsChanged() =>
-        _ = InvokeAsync(() =>
-        {
-            _configured = IsConfigured();
-            StateHasChanged();
-        });
-
+        await Refresh();
+        await Watch("status", Refresh);
+    });
+    private async Task Refresh() => _state = await Read<PanelStatus>("panel.status");
     private void New() => _conversationId = null;
-
-    public void Dispose() => Settings.Changed -= OnSettingsChanged;
 }

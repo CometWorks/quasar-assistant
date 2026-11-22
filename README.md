@@ -121,14 +121,14 @@ a fetch fails, the error shows next to the source and the assistant keeps the la
 
 ## Settings API
 
-Deployments set the assistant up with these routes, the same operations as the settings page. They need
-`CanManageSecurity`, take a session or a bearer token like Quasar's other APIs, are audited with secrets
-redacted, and are on the agents' deny list. The roles are `admin`, `player` and `monitor`.
+Deployment scripts can configure the assistant through these routes using a session or a bearer token.
+Quasar requires `CanManageSecurity`, audits the calls and denies access to agent principals. The roles
+are `admin`, `player` and `monitor`.
 
 | Method | Route | Body |
 |---|---|---|
-| GET | `/api/v1/assistant/settings` | The settings, the backends that have an API key (`apiKeys`) and whether the sandbox token is set. No secrets. |
-| PUT | `/api/v1/assistant/settings/backends` | `{"backends": [...], "apiKeys": {"name": "key"}}` replaces the backends. A key given sets it, `""` removes it, a backend left out of `apiKeys` keeps its key. |
+| GET | `/api/v1/assistant/settings` | The settings, the backends that have an API key (`apiKeys`) and whether the sandbox token is set. Backend headers are listed by name with empty values. |
+| PUT | `/api/v1/assistant/settings/backends` | `{"backends": [...], "apiKeys": {"name": "key"}}` replaces the backends. A key given sets it, `""` removes it, a backend left out of `apiKeys` keeps its key. An empty value for a listed backend header keeps its existing value. |
 | PUT | `/api/v1/assistant/settings/roles/{role}` | `{"settings": {...}, "player": {...}, "monitor": {...}}`: the role's settings, the player support settings (`player` role only) and the monitor's (`monitor` role only). A part given replaces that part whole, with defaults for what it leaves out; a part left out stays as it is. Read the settings first to change one value. |
 | GET | `/api/v1/assistant/skills[?role=player]` | Per role the names of the written skills and the sources with what they resolved to. |
 | PUT | `/api/v1/assistant/skills/{role}/{name}` | `{"kind": "git", "repository": "https://github.com/o/r.git", "ref": "main", "paths": ["skills/faq"], "token": "..."}` (or `"url"`: a folder URL instead of the three), `{"kind": "zip", "content": "<base64>", "fileName": "skills.zip"}` or `{"kind": "file", "content": "<base64>"}`. Adds or replaces the source. `token` left out keeps it, `""` removes it. |
@@ -136,8 +136,9 @@ redacted, and are on the agents' deny list. The roles are `admin`, `player` and 
 | POST | `/api/v1/assistant/skills/{role}/{name}/refresh` | Fetches a repository source again. |
 
 A refused request answers 400 with the reason, an unknown source 404. A repository that can't be fetched still
-saves the source and answers 200 with its `error`, so check it. Backend headers are stored as given and are not
-redacted in the audit log; put keys in `apiKeys`.
+saves the source and answers 200 with its `error`, so check it. Supply backend keys in `apiKeys`.
+Quasar versions with name-based audit redaction can record custom header values submitted through this scripting API.
+The settings page sends credential edits in a staged body and displays only stored header names.
 
 ```bash
 curl -sS -X PUT -H 'Content-Type: application/json' http://127.0.0.1:8080/api/v1/assistant/skills/player/octahedron \
@@ -246,6 +247,8 @@ use `/ask`. New proposals and hand-overs can be posted to the admin channel with
 
 ## Pages
 
+Version 2 requires Quasar 1.7.0. The dashboard loads the same WebAssembly drawer and pages on a local worker and under a hosted panel path. The panel SDK binds each request to the signed-in account. Conversation ownership, proposal decisions, model calls, MCP tools, credential storage and settings rollback all run on the worker. Closing the drawer or leaving the page disconnects its view while the worker finishes the run.
+
 | Page | Who | What |
 |---|---|---|
 | Drawer on every page | `CanUseAssistant` | A launcher button and a chat panel that starts with the page and server as context. |
@@ -287,7 +290,7 @@ Everything lives in `plugin-data/quasar.assistant/` in the Quasar data folder:
 
 ## Building
 
-The adapter and the UI project build against `Quasar.Plugin.Abstractions`. The QuasarHub installer passes
+The adapter and worker project build against `Quasar.Plugin.Abstractions`. The QuasarHub installer passes
 `QuasarPluginAbstractionsAssembly`, the DLL of the running Quasar. A local build uses a Quasar checkout next
 to this repository (`../Quasar`), or the project named by `QuasarPluginAbstractionsProject`:
 
@@ -296,6 +299,13 @@ export QuasarPluginAbstractionsProject=/path/to/quasar/Quasar.Plugin.Abstraction
 dotnet build QuasarAssistant.slnx
 dotnet test tests/QuasarAssistant.Tests
 ```
+
+To run the browser checks, build the adapter in Release. From the Quasar checkout, run its
+`tests/Quasar.Wasm.DashboardChecks` project with `QUASAR_TEST_PLUGIN_PACKAGE` set to this
+repository, `QUASAR_TEST_PLUGIN_DRIVER` to the absolute path of `tests/browser/assistant.mjs`,
+and `QUASAR_DASHBOARD_PUBLISH` to the published worker directory. The driver uses a loopback
+model fixture and exercises the drawer, streaming, stopping a run, approval decisions, skill
+uploads, settings rollback and lore at both panel paths.
 
 The tests run the agent loop against an in-process stub server that speaks both streaming formats, and a stub
 MCP server, with fake Quasar services. They never call a real model.
@@ -326,7 +336,7 @@ repository and records it in `src/QuasarAssistant/QuasarBook/COMMIT`.
 ## Layout
 
 ```text
-src/QuasarAssistant/          services and Razor UI
+src/QuasarAssistant/          worker services
   Llm/                        message model, the two API formats, the client, failover
   Agent/                      tools and modes, the run loop, proposals, restores, hand-overs, the prompts
   Players/                    the ask and assistant commands, player limits
@@ -335,10 +345,12 @@ src/QuasarAssistant/          services and Razor UI
   Mcp/                        the MCP client and the servers' tools
   Skills/                     the Quasar book and the admins' skills
   QuasarBook/                 the book's pages, pinned to a Quasar commit
-  Settings/                   settings, encrypted API keys and headers, the page's forms
+  Settings/                   settings, encrypted API keys and headers
   Storage/                    conversations, proposals, hand-overs, metrics
+  Panel/                      worker operations for the browser UI
+src/QuasarAssistant.Browser/  browser assembly and panel DTOs
   Components/, Pages/         drawer, chat, cards, settings editors, pages
-  wwwroot/assistant.css
+  wwwroot/                    panel SDK module and CSS
 src/QuasarAssistant.Quasar/   the IQuasarPlugin adapter
 scripts/                      refresh-quasar-book.sh
 tests/QuasarAssistant.Tests/  xunit tests with the stub model and MCP servers

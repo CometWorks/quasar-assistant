@@ -116,3 +116,5 @@ body:has(.assistant-page) :is(.assistant-launcher, .assistant-drawer) { display:
 .assistant-tab-panel { padding-top: 16px; }
 .assistant-tab-panel > section:first-child > h2:first-child { margin-top: 0; }
 .assistant-skill-list { margin: 4px 0 0; padding-left: 18px; }
+
+.assistant-settings-controls { border: 0; margin: 0; padding: 0; min-width: 0; }

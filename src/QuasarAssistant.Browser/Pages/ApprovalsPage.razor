@@ -1,0 +1,60 @@
+@inherits PanelComponent
+@page "/assistant/approvals"
+@attribute [Authorize(Policy = "CanUseAssistant")]
+
+<PageTitle>Approvals</PageTitle>
+<div class="assistant-surface">
+    <h1>Approvals</h1>
+    <p class="assistant-hint">Changes the assistant proposed, and players the player agent handed to the admins. Approving runs the change as the assistant acting for the person or player who asked, and Quasar checks both of you again at that moment.</p>
+
+    @if (_state is not null)
+    {
+    <h2>Players waiting for an admin</h2>
+    @if (!_state.Handovers.Where(h => !h.Handled).Any())
+    {
+        <p>No player is waiting.</p>
+    }
+    @foreach (var handover in _state.Handovers.Where(h => !h.Handled).OrderBy(h => h.Created))
+    {
+        <HandoverCard @key="handover.Id" Handover="handover" CanHandle="_state.CanHandle" />
+    }
+
+    <h2>Waiting</h2>
+    @if (!_state.Cards.Where(p => p.Proposal.Status == ProposalStatus.Pending).Any())
+    {
+        <p>Nothing waits for approval.</p>
+    }
+    @foreach (var proposal in _state.Cards.Where(p => p.Proposal.Status == ProposalStatus.Pending).OrderBy(p => p.Proposal.Created))
+    {
+        <ProposalCard @key="proposal.Proposal.Id" Proposal="proposal.Proposal" CanApprove="proposal.CanApprove" ShowAsker="true" />
+    }
+
+    <h2>Decided</h2>
+    var decided = _state.Cards.Where(p => p.Proposal.Status != ProposalStatus.Pending).OrderByDescending(p => p.Proposal.Decided).Take(50).ToList();
+    @if (decided.Count == 0)
+    {
+        <p>No decisions yet.</p>
+    }
+    @foreach (var proposal in decided)
+    {
+        <ProposalCard @key="proposal.Proposal.Id" Proposal="proposal.Proposal" CanApprove="proposal.CanApprove" ShowAsker="true" />
+    }
+    var handled = _state.Handovers.Where(h => h.Handled).OrderByDescending(h => h.HandledAt).Take(20).ToList();
+    @foreach (var handover in handled)
+    {
+        <HandoverCard @key="handover.Id" Handover="handover" CanHandle="_state.CanHandle" />
+    }
+    }
+</div>
+
+@if (PanelError is not null) { <p class="assistant-error" role="alert">@PanelError</p> }
+
+@code {
+    private ApprovalList? _state;
+    protected override Task OnInitializedAsync() => Try(async () =>
+    {
+        await Refresh();
+        await Watch("approvals", Refresh);
+    });
+    private async Task Refresh() => _state = await Read<ApprovalList>("approvals.list");
+}

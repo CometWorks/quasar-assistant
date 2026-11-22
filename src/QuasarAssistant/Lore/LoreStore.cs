@@ -6,13 +6,7 @@ using QuasarAssistant.Storage;
 
 namespace QuasarAssistant.Lore;
 
-public static class LoreKinds
-{
-    public const string None = "none";
-    public const string Text = "text";
-    public const string Git = "git";
-    public const string Folder = "folder";
-}
+
 
 /// <summary>A lore page; <paramref name="AdminOnly"/> pages (under an <c>admin/</c> folder of a skill) are never
 /// given to the player agent.</summary>
@@ -41,32 +35,6 @@ public sealed record LoreEntry
 }
 
 /// <summary>What the API and the settings page show of an entry; the token only as set or not.</summary>
-public sealed record LoreView(
-    string Target,
-    string Kind,
-    string Text,
-    string GitUrl,
-    bool TokenSet,
-    string? Revision,
-    DateTimeOffset? FetchedAt,
-    DateTimeOffset? AttemptedAt,
-    string? Error,
-    IReadOnlyList<string> Pages,
-    string Folder = ""
-);
-
-/// <param name="Token">A Git access token for a private repository: null keeps the stored one, empty removes it.</param>
-public sealed record LoreSetRequest(
-    string Target,
-    string Kind,
-    string? Text = null,
-    string? GitUrl = null,
-    string? Token = null,
-    string? Folder = null
-);
-
-public sealed record LoreTargetRequest(string Target);
-
 /// <summary>
 /// The lore of each server and cluster, for the agents to read as <c>lore/…</c> skill pages. A cluster has one lore
 /// for all its nodes: chat from a node names the cluster. Free text is one page; a Git skill or a folder on the
@@ -115,14 +83,7 @@ public sealed class LoreStore
     /// <summary>Lets tests use <c>file://</c> repositories; admins only get https.</summary>
     internal bool AllowFileUrls { get; set; }
 
-    /// <summary>The key of a server's or cluster's unique name, with or without <c>cluster:</c>.</summary>
-    public static string? Key(string? target)
-    {
-        var key = target?.Trim() ?? "";
-        if (key.StartsWith("cluster:", StringComparison.OrdinalIgnoreCase))
-            key = key["cluster:".Length..].Trim();
-        return key.Length == 0 ? null : key.ToLowerInvariant();
-    }
+    public static string? Key(string? target) => LoreTargetRequest.Key(target);
 
     public IReadOnlyList<LoreView> List()
     {

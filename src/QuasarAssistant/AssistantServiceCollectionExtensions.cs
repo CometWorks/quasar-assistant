@@ -1,3 +1,4 @@
+using QuasarAssistant.Panel;
 using System.Text.Json.Nodes;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
@@ -80,6 +81,7 @@ public static class AssistantServiceCollectionExtensions
         services.AddGridBackupsOperations();
         services.AddLoreOperations();
         services.AddSettingsOperations();
+        services.AddPanel();
         return services;
     }
 

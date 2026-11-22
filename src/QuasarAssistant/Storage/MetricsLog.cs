@@ -29,21 +29,6 @@ public sealed record RunMetrics
     public double Seconds { get; init; }
 }
 
-public sealed record DayMetrics(
-    DateOnly Day,
-    int Runs,
-    int Failed,
-    long PromptTokens,
-    long CachedTokens
-);
-
-public sealed record BackendMetrics(string Backend, int Answers, int Failures, int Fallovers);
-
-public sealed record MetricsSummary(
-    IReadOnlyList<DayMetrics> Days,
-    IReadOnlyList<BackendMetrics> Backends
-);
-
 public sealed class MetricsLog(AssistantPaths paths)
 {
     private readonly string _path = Path.Combine(paths.DataDirectory, "metrics.jsonl");
