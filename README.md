@@ -362,5 +362,5 @@ UI conventions are in [Native Quasar UI](docs/NativeUi.md).
 ## Publishing
 
 1. Build and test against the Quasar version the plugin targets.
-2. Copy `quasar-hub.xml` to `quasar-hub/Plugins/QuasarAssistant.xml` and set `Commit` to the exact commit.
+2. Update the existing `quasar-hub/Plugins/Assistant.xml` from `quasar-hub.xml` and set `Commit` to the exact merged source revision.
 3. Open a QuasarHub pull request.
