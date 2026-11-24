@@ -37,8 +37,6 @@ public sealed class Conversation
     }
 }
 
-public sealed record ConversationSummary(string Id, string Title, DateTimeOffset Updated);
-
 /// <summary>Conversations as JSON files, one folder per asker, deleted some days after their last message.</summary>
 public sealed class ConversationStore(AssistantPaths paths, TimeProvider time)
 {
@@ -107,7 +105,10 @@ public sealed class ConversationStore(AssistantPaths paths, TimeProvider time)
         if (!Guid.TryParseExact(id, "N", out _))
             return null;
         var conversation = JsonFiles.Read<Conversation>(FilePath(ownerSubject, id));
-        return conversation is null ? null : _loaded.GetOrAdd(id, conversation);
+        if (conversation?.OwnerSubject != ownerSubject || conversation.Id != id)
+            return null;
+        var saved = _loaded.GetOrAdd(id, conversation);
+        return saved.OwnerSubject == ownerSubject ? saved : null;
     }
 
     public IReadOnlyList<ConversationSummary> List(string ownerSubject)

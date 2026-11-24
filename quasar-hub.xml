@@ -23,7 +23,7 @@
   <PluginKind>QuasarUiPlugin</PluginKind>
   <ProjectPath>src/QuasarAssistant.Quasar/QuasarAssistant.Quasar.csproj</ProjectPath>
   <PackageManifest>quasar-plugin.json</PackageManifest>
-  <QuasarVersion>&gt;=1.6.0.19</QuasarVersion>
+  <QuasarVersion>&gt;=1.7.0</QuasarVersion>
   <CompanionPluginIds>
     <CompanionPluginId>9AC2F6A8-B8A7-4250-8814-BADE62C5CF3C</CompanionPluginId>
   </CompanionPluginIds>

@@ -1,4 +1,4 @@
-@using Quasar.Plugin.Abstractions.Operations
+@inherits PanelComponent
 
 @* One role's backends, limits, notes and modes; the page saves the form. *@
 <h3>Backends, in failover order</h3>
@@ -48,7 +48,7 @@
         <table>
             <thead><tr><th scope="col">Area</th><th scope="col">Mode</th></tr></thead>
             <tbody>
-                @foreach (var area in Operations.Select(ToolCatalog.Area).Distinct().Order())
+                @foreach (var area in Operations.Select(op => op.Area).Distinct().Order())
                 {
                     <tr>
                         <th scope="row">@area</th>
@@ -76,10 +76,10 @@
             <tbody>
                 @foreach (var operation in Operations)
                 {
-                    var effective = ToolCatalog.EffectiveMode(operation, Form.ToSettings());
+                    var effective = Form.OperationModes.GetValueOrDefault(operation.Key, Form.AreaModes.GetValueOrDefault(operation.Area, operation.Read ? ToolMode.Read : ToolMode.Propose));
                     <tr>
                         <th scope="row"><code>@operation.Key</code></th>
-                        <td>@(ToolCatalog.Effect(operation) == QuasarOperationEffect.Read ? "read" : "change")</td>
+                        <td>@(operation.Read ? "read" : "change")</td>
                         <td>
                             <select value="@(Form.OperationModes.TryGetValue(operation.Key, out var mode) ? mode.ToString() : "")" aria-label="Mode for @operation.Key"
                                     @onchange="e => SetModeAsync(Form.OperationModes, operation.Key, (string?)e.Value)">
@@ -90,7 +90,7 @@
                                 }
                             </select>
                         </td>
-                        <td>@(ToolCatalog.IsOffered(operation, effective) ? effective.ToString() : "not offered")</td>
+                        <td>@(effective != ToolMode.Off && (effective != ToolMode.Read || operation.Read) ? effective.ToString() : "not offered")</td>
                     </tr>
                 }
             </tbody>
@@ -103,6 +103,8 @@
 
 <McpEditor Role="@Role" Servers="Form.McpServers" Changed="Changed" />
 
+@if (PanelError is not null) { <p class="assistant-error" role="alert">@PanelError</p> }
+
 @code {
     [Parameter, EditorRequired] public RoleForm Form { get; set; } = null!;
     [Parameter, EditorRequired] public string Role { get; set; } = "";
@@ -112,7 +114,7 @@
     [Parameter] public EventCallback Changed { get; set; }
 
     /// <summary>The operations whose modes this role sets.</summary>
-    [Parameter, EditorRequired] public IReadOnlyList<QuasarOperation> Operations { get; set; } = [];
+    [Parameter, EditorRequired] public IReadOnlyList<ModeOption> Operations { get; set; } = [];
 
     private string? _addBackend;
 

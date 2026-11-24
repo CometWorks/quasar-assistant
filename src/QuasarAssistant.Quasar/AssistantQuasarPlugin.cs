@@ -1,3 +1,4 @@
+using Quasar.Plugin.Abstractions.Operations;
 using System.Reflection;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
@@ -22,10 +23,10 @@ public sealed class AssistantQuasarPlugin : IQuasarPlugin
             Path.Combine(context.InstallDirectory, "plugin-data", context.PluginId)
         );
 
-    // Only the lore and settings APIs, whose operations are on the agents' deny list: nothing an agent could call
-    // reaches the settings or the lore. The other operations (MCP calls, the player's Grid Backups ones) have no routes.
+    // The panel-scoped SDK bridge serves the browser UI. Scripts keep the existing lore and settings APIs.
     public void ConfigureEndpoints(IEndpointRouteBuilder endpoints, QuasarPluginContext context)
     {
+        endpoints.MapQuasarSdkClient("/_quasar/plugins/quasar.assistant/_sdk/client.js");
         endpoints.MapLoreApi();
         endpoints.MapSettingsApi();
     }

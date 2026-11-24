@@ -1,28 +1,26 @@
+@inherits PanelComponent
 @page "/assistant/monitor"
-@attribute [Authorize(Policy = QuasarPolicyNames.CanUseAssistant)]
+@attribute [Authorize(Policy = "CanUseAssistant")]
 @using QuasarAssistant.Monitoring
-@implements IDisposable
-@inject IncidentStore Incidents
-@inject MonitorBudget Budget
-@inject MonitorChecks Checks
-@inject SettingsStore Settings
 
 <PageTitle>Monitor</PageTitle>
 <div class="assistant-surface">
     <h1>Monitor</h1>
     <p class="assistant-hint">Problems the monitor's checks found on the servers and clusters, and what the model found and did about them. Its changes in propose mode wait on the Approvals page.</p>
-    @if (!Settings.Current.Monitor.Enabled)
+    @if (_state is not null)
+    {
+    @if (!_state.Enabled)
     {
         <p class="assistant-notice">The monitor is off. An admin turns it on in the assistant settings.</p>
     }
-    @if (Checks.LastError is { } error)
+    @if (_state.Error is { } error)
     {
         <p class="assistant-error" role="alert">The last check couldn't read the servers: @error</p>
     }
-    <p role="status">@SettingsPage.BudgetLine(Budget.Status())</p>
+    <p role="status">@SettingsPage.BudgetLine(_state.Budget)</p>
 
     <h2>Open</h2>
-    @{ var open = Incidents.All.Where(i => i.Resolved is null).OrderByDescending(i => i.Opened).ToList(); }
+    var open = _state.Incidents.Where(i => i.Resolved is null).OrderByDescending(i => i.Opened).ToList();
     @if (open.Count == 0)
     {
         <p>No open problem.</p>
@@ -33,7 +31,7 @@
     }
 
     <h2>Resolved</h2>
-    @{ var resolved = Incidents.All.Where(i => i.Resolved is not null).OrderByDescending(i => i.Resolved).Take(50).ToList(); }
+    var resolved = _state.Incidents.Where(i => i.Resolved is not null).OrderByDescending(i => i.Resolved).Take(50).ToList();
     @if (resolved.Count == 0)
     {
         <p>Nothing resolved yet.</p>
@@ -42,7 +40,10 @@
     {
         @Card(incident)
     }
+    }
 </div>
+
+@if (PanelError is not null) { <p class="assistant-error" role="alert">@PanelError</p> }
 
 @code {
     private RenderFragment Card(Incident incident) =>
@@ -62,9 +63,11 @@
 
     private static string Utc(DateTimeOffset time) => time.UtcDateTime.ToString("yyyy-MM-dd HH:mm") + " UTC";
 
-    protected override void OnInitialized() => Incidents.Changed += OnChanged;
-
-    private void OnChanged() => _ = InvokeAsync(StateHasChanged);
-
-    public void Dispose() => Incidents.Changed -= OnChanged;
+    private MonitorView? _state;
+    protected override Task OnInitializedAsync() => Try(async () =>
+    {
+        await Refresh();
+        await Watch("monitor", Refresh);
+    });
+    private async Task Refresh() => _state = await Read<MonitorView>("monitor.read");
 }

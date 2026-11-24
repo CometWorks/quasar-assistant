@@ -98,6 +98,7 @@ public static class SettingsApi
             new QuasarOperationMetadata
             {
                 Effect = QuasarOperationEffect.Read,
+                RequireDefaultPolicies = true,
                 AgentAccess = QuasarAgentAccess.Denied,
                 Description = "Reads the assistant's settings, without secrets.",
             }
@@ -112,6 +113,7 @@ public static class SettingsApi
                 ),
             new QuasarOperationMetadata
             {
+                RequireDefaultPolicies = true,
                 AgentAccess = QuasarAgentAccess.Denied,
                 Description = "Replaces the assistant's model backends and sets their API keys.",
             }
@@ -126,6 +128,7 @@ public static class SettingsApi
                 ),
             new QuasarOperationMetadata
             {
+                RequireDefaultPolicies = true,
                 AgentAccess = QuasarAgentAccess.Denied,
                 Description =
                     "Sets an assistant role's settings: backends, modes, MCP servers and limits, and the player support or monitor settings.",
@@ -162,6 +165,7 @@ public static class SettingsApi
             new QuasarOperationMetadata
             {
                 Effect = QuasarOperationEffect.Read,
+                RequireDefaultPolicies = true,
                 AgentAccess = QuasarAgentAccess.Denied,
                 Description = "Lists each assistant role's skills and skill sources.",
             }
@@ -176,6 +180,7 @@ public static class SettingsApi
                 ),
             new QuasarOperationMetadata
             {
+                RequireDefaultPolicies = true,
                 AgentAccess = QuasarAgentAccess.Denied,
                 Deadline = FetchDeadline,
                 Description =
@@ -199,6 +204,7 @@ public static class SettingsApi
                 ),
             new QuasarOperationMetadata
             {
+                RequireDefaultPolicies = true,
                 AgentAccess = QuasarAgentAccess.Denied,
                 Description = "Removes a skill source of an assistant role.",
             }
@@ -219,6 +225,7 @@ public static class SettingsApi
                 ),
             new QuasarOperationMetadata
             {
+                RequireDefaultPolicies = true,
                 AgentAccess = QuasarAgentAccess.Denied,
                 Reversal = QuasarReversal.NothingToReverse,
                 Deadline = FetchDeadline,
@@ -238,23 +245,18 @@ public static class SettingsApi
             "/settings",
             (Delegate)((HttpContext http) => Dispatch(http, Read, new SettingsReadRequest()))
         );
-        routes.MapPut(
-            "/settings/backends",
-            (BackendsSetRequest body, HttpContext http) => Dispatch(http, SetBackends, body)
+        routes.MapPut("/settings/backends", (BackendsSetRequest body, HttpContext http) =>
+            Dispatch(http, SetBackends, body)
         );
-        routes.MapPut(
-            "/settings/roles/{role}",
-            (string role, RoleBody body, HttpContext http) =>
-                Dispatch(
-                    http,
-                    SetRole,
-                    new RoleSetRequest(role, body.Settings, body.Player, body.Monitor)
-                )
+        routes.MapPut("/settings/roles/{role}", (string role, RoleBody body, HttpContext http) =>
+            Dispatch(
+                http,
+                SetRole,
+                new RoleSetRequest(role, body.Settings, body.Player, body.Monitor)
+            )
         );
-        routes.MapGet(
-            "/skills",
-            (string? role, HttpContext http) =>
-                Dispatch(http, ListSkills, new SkillsListRequest(role))
+        routes.MapGet("/skills", (string? role, HttpContext http) =>
+            Dispatch(http, ListSkills, new SkillsListRequest(role))
         );
         routes.MapPut(
             "/skills/{role}/{name}",
@@ -276,10 +278,8 @@ public static class SettingsApi
                     )
                 )
         );
-        routes.MapDelete(
-            "/skills/{role}/{name}",
-            (string role, string name, HttpContext http) =>
-                Dispatch(http, RemoveSource, new SkillSourceRequest(role, name))
+        routes.MapDelete("/skills/{role}/{name}", (string role, string name, HttpContext http) =>
+            Dispatch(http, RemoveSource, new SkillSourceRequest(role, name))
         );
         routes.MapPost(
             "/skills/{role}/{name}/refresh",
@@ -288,11 +288,24 @@ public static class SettingsApi
         );
     }
 
+    internal static AssistantSettings PublicSettings(AssistantSettings settings) =>
+        settings with
+        {
+            Backends = settings
+                .Backends.Select(b =>
+                    b with
+                    {
+                        Headers = b.Headers.Keys.ToDictionary(k => k, _ => ""),
+                    }
+                )
+                .ToList(),
+        };
+
     public static SettingsView View(SettingsStore store)
     {
         var settings = store.Current;
         return new(
-            settings,
+            PublicSettings(settings),
             settings
                 .Backends.Where(backend => store.HasApiKey(backend.Name))
                 .Select(backend => backend.Name)
@@ -306,8 +319,8 @@ public static class SettingsApi
         BackendsSetRequest request
     )
     {
-        var backends =
-            request.Backends ?? throw new ArgumentException("Give the backends as a list.");
+        var backends = request.Backends
+            ?? throw new ArgumentException("Give the backends as a list.");
         foreach (var backend in backends)
             if (BackendProblem(backend) is { } problem)
                 throw new ArgumentException(problem);
@@ -326,9 +339,30 @@ public static class SettingsApi
             { } unknown
         )
             throw new ArgumentException($"There is no backend named {unknown} for the API key.");
-        store.Save(store.Current with { Backends = backends.Select(Normalized).ToList() });
-        foreach (var (name, key) in keys)
-            store.SetApiKey(name, string.IsNullOrWhiteSpace(key) ? null : key.Trim());
+        store.Edit(() =>
+        {
+            var current = store.Current;
+            var updated = backends
+                .Select(Normalized)
+                .Select(backend =>
+                {
+                    var old = current.Backends.FirstOrDefault(b => b.Name == backend.Name);
+                    return backend with
+                    {
+                        Headers = backend.Headers.ToDictionary(
+                            h => h.Key,
+                            h =>
+                                h.Value == ""
+                                    ? old?.Headers.GetValueOrDefault(h.Key) ?? ""
+                                    : h.Value
+                        ),
+                    };
+                })
+                .ToList();
+            foreach (var (name, key) in keys)
+                store.SetApiKey(name, string.IsNullOrWhiteSpace(key) ? null : key.Trim());
+            store.Save(current with { Backends = updated });
+        });
         return Task.FromResult(View(store));
     }
 
@@ -365,7 +399,7 @@ public static class SettingsApi
         return Task.FromResult(View(store));
     }
 
-    private static string? BackendProblem(BackendSettings backend)
+    internal static string? BackendProblem(BackendSettings backend)
     {
         if (string.IsNullOrWhiteSpace(backend.Name) || backend.Name.Trim().Length > 64)
             return "A backend needs a name of at most 64 characters.";

@@ -84,7 +84,7 @@ public sealed class MarkdownTests
         Assert.Equal(
             "<p>Docs: <a href=\"https://example.com/a_b\" target=\"_blank\" rel=\"noopener noreferrer nofollow\">https://example.com/a_b</a>, "
                 + "<a href=\"http://x.test/\" target=\"_blank\" rel=\"noopener noreferrer nofollow\">http://x.test/</a> and "
-                + "<a href=\"/servers/alpha\">Alpha</a>.</p>",
+                + "<a href=\"./servers/alpha\">Alpha</a>.</p>",
             Markdown.ToHtml(
                 "Docs: https://example.com/a_b, <http://x.test/> and [Alpha](/servers/alpha)."
             )

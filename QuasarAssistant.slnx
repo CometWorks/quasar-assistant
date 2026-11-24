@@ -1,5 +1,6 @@
 <Solution>
   <Folder Name="/src/">
+    <Project Path="src/QuasarAssistant.Browser/QuasarAssistant.Browser.csproj" />
     <Project Path="src/QuasarAssistant.Quasar/QuasarAssistant.Quasar.csproj" />
     <Project Path="src/QuasarAssistant/QuasarAssistant.csproj" />
   </Folder>

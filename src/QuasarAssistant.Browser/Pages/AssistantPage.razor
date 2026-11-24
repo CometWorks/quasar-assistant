@@ -1,0 +1,52 @@
+@inherits PanelComponent
+@page "/assistant"
+@page "/assistant/chat"
+@page "/assistant/chat/{ConversationId}"
+@attribute [Authorize(Policy = "CanUseAssistant")]
+@inject NavigationManager Navigation
+
+<PageTitle>Assistant</PageTitle>
+@if (_state is not null)
+{
+<div class="assistant-page">
+    <nav class="assistant-conversations" aria-label="Your conversations">
+        <a class="assistant-button" href="assistant/chat"><AssistantIcon Icon="@AssistantIcons.Add" />New conversation</a>
+        <ul>
+            @foreach (var conversation in _state.Items)
+            {
+                <li class="@(conversation.Id == ConversationId ? "assistant-current" : "")">
+                    <a href="@("assistant/chat/" + conversation.Id)" aria-current="@(conversation.Id == ConversationId ? "page" : null)">
+                        <span>@conversation.Title</span>
+                        <small>@conversation.Updated.ToUniversalTime().ToString("yyyy-MM-dd HH:mm") UTC</small>
+                    </a>
+                </li>
+            }
+        </ul>
+        <p class="assistant-hint">Conversations are deleted @_state.RetentionDays days after their last message.</p>
+    </nav>
+    <section class="assistant-page-chat">
+        @if (ConversationId is not null && _state.Missing)
+        {
+            <p class="assistant-error" role="alert">This conversation doesn't exist or isn't yours.</p>
+        }
+        else
+        {
+            <ChatView @key="ConversationId" ConversationId="@ConversationId" PageUri="@Navigation.Uri"
+                      ConversationStarted="@(id => Navigation.NavigateTo("assistant/chat/" + id))" />
+        }
+    </section>
+</div>
+
+}
+@if (PanelError is not null) { <p class="assistant-error" role="alert">@PanelError</p> }
+
+@code {
+    [Parameter] public string? ConversationId { get; set; }
+    private ChatIndex? _state;
+    protected override Task OnParametersSetAsync() => Try(async () =>
+    {
+        await Refresh();
+        await Watch("index", Refresh);
+    });
+    private async Task Refresh() => _state = await Read<ChatIndex>("chat.list", new ItemId(ConversationId ?? ""));
+}

@@ -45,6 +45,7 @@ public static class LoreOperations
             new QuasarOperationMetadata
             {
                 Effect = QuasarOperationEffect.Read,
+                RequireDefaultPolicies = true,
                 AgentAccess = QuasarAgentAccess.Denied,
                 Description = "Lists the lore of each server and cluster for the assistant.",
             }
@@ -59,6 +60,7 @@ public static class LoreOperations
                 ),
             new QuasarOperationMetadata
             {
+                RequireDefaultPolicies = true,
                 AgentAccess = QuasarAgentAccess.Denied,
                 Deadline = FetchDeadline,
                 Description =
@@ -79,6 +81,7 @@ public static class LoreOperations
                 ),
             new QuasarOperationMetadata
             {
+                RequireDefaultPolicies = true,
                 AgentAccess = QuasarAgentAccess.Denied,
                 Reversal = QuasarReversal.NothingToReverse,
                 Deadline = FetchDeadline,

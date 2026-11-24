@@ -1,11 +1,11 @@
+@inherits PanelComponent
 @using QuasarAssistant.Skills
-@inject SkillLibrary Skills
 
 @* The admins' Markdown skills of one role, saved as they are edited to skills/<role>/ in the data folder. *@
 <h3>Skills</h3>
 <p class="assistant-hint">@Hint</p>
 <ul class="assistant-checklist">
-    @foreach (var skill in Skills.Skills(Role))
+    @foreach (var skill in _skills)
     {
         <li>
             <button type="button" class="assistant-button" @onclick="() => Edit(skill)"><code>@skill.Name</code></button>
@@ -38,6 +38,8 @@ else
     </form>
 }
 
+@if (PanelError is not null) { <p class="assistant-error" role="alert">@PanelError</p> }
+
 @code {
     [Parameter, EditorRequired] public string Role { get; set; } = "";
 
@@ -48,9 +50,9 @@ else
 
     private string Hint => Role == AssistantRoles.Player
         ? "Text the player agent finds with its search and reads on demand, such as the server's FAQ and rules. Nothing here runs, and none of it is in the prompt until the agent reads it."
-        : "Text the assistant finds with its search and reads on demand, next to the built-in Quasar book (Quasar " + SkillLibrary.BookCommit[..Math.Min(7, SkillLibrary.BookCommit.Length)] + "). Nothing here runs.";
+        : "Text the assistant finds with its search and reads on demand, next to the built-in Quasar book (Quasar " + BookCommit[..Math.Min(7, BookCommit.Length)] + "). Nothing here runs.";
 
-    private void Edit(SkillPage? skill)
+    private void Edit(WrittenSkill? skill)
     {
         _original = skill?.Name;
         _name = skill?.Name ?? "";
@@ -59,37 +61,43 @@ else
     }
 
     // Saved on every edit once it has a valid name; a new skill keeps that name from then on.
-    private bool Save()
+    private async Task<bool> Save()
     {
         var name = _name?.Trim() ?? "";
-        if (!SkillLibrary.IsValidName(name))
+        if (!ValidName(name))
         {
             _error = "A skill name is 1 to 64 letters, digits, - or _.";
             return false;
         }
-        if (_original is null && Skills.Skills(Role).Any(skill => skill.Name == name))
+        if (_original is null && _skills.Any(skill => skill.Name == name))
         {
             _error = $"There is already a skill named {name}.";
             return false;
         }
-        Skills.Save(Role, name, _text);
+        await Upload("skills.write", new SkillEdit(Role, name, _text, _original is null));
+        await Refresh();
         _original = name;
         _error = null;
         return true;
     }
 
-    private void AutoSave() => Save();
+    private Task AutoSave() => Try(async () => { await Save(); });
 
-    private void Done()
+    private Task Done() => Try(async () =>
     {
-        if (Save())
+        if (await Save())
             _name = null;
-    }
+    });
 
-    private void Delete()
+    private Task Delete() => Try(async () =>
     {
         if (_original is not null)
-            Skills.Delete(Role, _original);
+            await Upload("skills.write", new SkillEdit(Role, _original, null));
+        await Refresh();
         _name = null;
-    }
+    });
+    [Parameter] public string BookCommit { get; set; } = "";
+    private List<WrittenSkill> _skills = [];
+    private Task Refresh() => Try(async () => _skills = await Read<List<WrittenSkill>>("skills.written",new ItemId(Role)));
+    protected override Task OnParametersSetAsync() => Refresh();
 }
